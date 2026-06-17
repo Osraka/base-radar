@@ -1,0 +1,7 @@
+-- Full mock data seeding is handled by the repeatable Node seed script:
+--
+--   npm run seed:supabase
+--
+-- The script imports lib/mockData.ts, upserts apps by slug, and upserts latest
+-- metric rows by (app_id, measured_at). Keeping the seed in code avoids a
+-- second, stale copy of the 30-app mock dataset.

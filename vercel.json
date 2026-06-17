@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/refresh-metrics?secret=$REFRESH_SECRET",
+      "schedule": "0 0 * * *"
+    }
+  ]
+}
