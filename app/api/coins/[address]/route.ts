@@ -51,8 +51,15 @@ export async function GET(
     );
   } catch {
     return NextResponse.json(
-      { error: "Unable to load Base coin." },
-      { status: 500, headers: securityHeaders() }
+      {
+        data: null,
+        meta: {
+          warning: "Coin lookup is temporarily unavailable.",
+          source: "stale-cache",
+          persistence: "unavailable"
+        }
+      },
+      { status: 200, headers: securityHeaders() }
     );
   }
 }

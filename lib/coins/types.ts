@@ -81,4 +81,8 @@ export interface CoinRankingSnapshot {
   isDataStale: boolean;
   staleAfterMinutes: number;
   discoveryStaleAfterMinutes: number;
+  source: "persisted" | "dexscreener-fallback" | "stale-cache";
+  persistence: "available" | "unavailable" | "empty";
+  persistenceAvailable: boolean;
+  warnings: string[];
 }

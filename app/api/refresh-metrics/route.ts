@@ -16,12 +16,14 @@ import type { AdapterMetrics } from "@/lib/adapters/types";
 import { getBasePublicClient } from "@/lib/baseClient";
 import { attributeTransaction } from "@/lib/builderCodes/attribution";
 import { calculateBuilderCodeMetricsForApp } from "@/lib/builderCodes/metricsBridge";
+import { verifyRefreshRequest } from "@/lib/cronAuth";
 import { getRecentContractActivity } from "@/lib/indexer/baseActivity";
 import {
   RATE_LIMITED_ERROR,
   rateLimitHeaders,
   rateLimitRefresh
 } from "@/lib/rateLimit";
+import { acquireRefreshLock, releaseRefreshLock } from "@/lib/refreshLocks";
 import { calculateGrowth, calculateTrendScore } from "@/lib/scoring";
 import {
   isValidEthereumAddress,
@@ -144,19 +146,6 @@ function getTokenSnapshotLimit() {
     process.env.TOKEN_SNAPSHOT_LIMIT_PER_BUCKET,
     25,
     50
-  );
-}
-
-function getProvidedRefreshSecret(request: Request) {
-  const url = new URL(request.url);
-  const authorization = request.headers.get("authorization")?.trim() ?? "";
-  const bearerMatch = authorization.match(/^Bearer\s+(.+)$/i);
-
-  return (
-    bearerMatch?.[1]?.trim() ||
-    url.searchParams.get("secret")?.trim() ||
-    request.headers.get("x-refresh-secret")?.trim() ||
-    ""
   );
 }
 
@@ -531,6 +520,7 @@ async function handleRefresh(request: Request) {
   const startedAt = Date.now();
   let supabase: ReturnType<typeof createSupabaseAdminClient> | null = null;
   let refreshRunId: string | null = null;
+  let lockAcquired = false;
 
   try {
     const rateLimit = await rateLimitRefresh(request);
@@ -548,10 +538,9 @@ async function handleRefresh(request: Request) {
       );
     }
 
-    const configuredSecret = process.env.REFRESH_SECRET;
-    const providedSecret = getProvidedRefreshSecret(request);
+    const auth = verifyRefreshRequest(request);
 
-    if (!configuredSecret || providedSecret !== configuredSecret) {
+    if (!auth.authorized) {
       return NextResponse.json(
         { error: "Unauthorized." },
         {
@@ -564,10 +553,50 @@ async function handleRefresh(request: Request) {
       );
     }
 
+    lockAcquired = acquireRefreshLock("app-metrics-refresh", 55 * 60_000);
+
+    if (!lockAcquired) {
+      return NextResponse.json(
+        {
+          ok: true,
+          processedApps: 0,
+          baseRpcMetricsInserted: 0,
+          protocolAdapterMetricsInserted: 0,
+          builderCodeMetricsInserted: 0,
+          attributionsInserted: 0,
+          socialTrendsInserted: 0,
+          tokenSnapshotsInserted: 0,
+          skippedApps: 0,
+          errors: 0,
+          measuredAt: new Date().toISOString(),
+          warnings: ["App metrics refresh is already running; duplicate execution skipped."]
+        },
+        {
+          headers: {
+            ...securityHeaders(rateLimit),
+            ...rateLimitHeaders(rateLimit)
+          }
+        }
+      );
+    }
+
     if (!isSupabaseAdminConfigured()) {
       return NextResponse.json(
-        { error: "Metrics refresh is not configured." },
-        { status: 500, headers: securityHeaders(rateLimit) }
+        {
+          ok: false,
+          processedApps: 0,
+          baseRpcMetricsInserted: 0,
+          protocolAdapterMetricsInserted: 0,
+          builderCodeMetricsInserted: 0,
+          attributionsInserted: 0,
+          socialTrendsInserted: 0,
+          tokenSnapshotsInserted: 0,
+          skippedApps: 0,
+          errors: 1,
+          measuredAt: new Date().toISOString(),
+          warnings: ["Metrics refresh is not configured."]
+        },
+        { status: 200, headers: securityHeaders(rateLimit) }
       );
     }
 
@@ -936,9 +965,26 @@ async function handleRefresh(request: Request) {
     });
 
     return NextResponse.json(
-      { error: "Unable to refresh metrics." },
-      { status: 500, headers: securityHeaders() }
+      {
+        ok: false,
+        processedApps: 0,
+        baseRpcMetricsInserted: 0,
+        protocolAdapterMetricsInserted: 0,
+        builderCodeMetricsInserted: 0,
+        attributionsInserted: 0,
+        socialTrendsInserted: 0,
+        tokenSnapshotsInserted: 0,
+        skippedApps: 0,
+        errors: 1,
+        measuredAt: new Date().toISOString(),
+        warnings: ["Unable to refresh metrics. Check server logs for safe error categories."]
+      },
+      { status: 200, headers: securityHeaders() }
     );
+  } finally {
+    if (lockAcquired) {
+      releaseRefreshLock("app-metrics-refresh");
+    }
   }
 }
 

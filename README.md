@@ -994,6 +994,58 @@ Monitoring notes:
 
 Official reference: Vercel Cron makes a scheduled HTTP request to the configured `path`: https://vercel.com/docs/cron-jobs
 
+## Running Base Radar on Vercel Hobby with cron-job.org
+
+Base Radar is designed to stay compatible with the Vercel Hobby/free plan.
+Vercel Cron remains a daily backup only. Fast refresh jobs should be triggered
+by an external scheduler such as cron-job.org.
+
+Use `GET` for all cron-job.org jobs. The endpoints also support
+`Authorization: Bearer <REFRESH_SECRET>`, but query-string auth is documented
+here because cron-job.org is easiest to configure with a URL.
+
+Job 1 — Discover new Base coins:
+
+- Frequency: every 10 minutes
+- URL:
+  `https://base-radar-e9a3bug42-mitolojis-projects.vercel.app/api/discover-coins?secret=YOUR_REFRESH_SECRET`
+- Expected success status: `200`
+- Expected response: `success: true`, plus discovered/refreshed/skipped/failure counters
+- Health fields to watch: `lastCoinDiscoveryAt`, `isCoinDiscoveryStale`, `warnings`
+
+Job 2 — Refresh tracked coin metrics:
+
+- Frequency: every 15 minutes
+- URL:
+  `https://base-radar-e9a3bug42-mitolojis-projects.vercel.app/api/refresh-coins?secret=YOUR_REFRESH_SECRET`
+- Expected success status: `200`
+- Expected response: same safe summary shape as coin discovery
+- Health fields to watch: `coinLastUpdated`, `lastCoinRefreshAt`, `isCoinDataStale`, `warnings`
+
+Job 3 — Refresh app metrics:
+
+- Frequency: every 60 minutes
+- URL:
+  `https://base-radar-e9a3bug42-mitolojis-projects.vercel.app/api/refresh-metrics?secret=YOUR_REFRESH_SECRET`
+- Expected success status: `200`
+- Expected response: app metrics counters such as `processedApps`, `skippedApps`, and `errors`
+- Health fields to watch: `lastAppRefreshAt`, `isAppDataStale`, `latestRefreshStatus`, `warnings`
+
+cron-job.org settings:
+
+- Method: `GET`
+- Timeout: 30 to 60 seconds
+- Retry behavior: enable one retry if available, but avoid aggressive retries
+  because each endpoint is idempotent and protected by a lightweight concurrent-run lock.
+- Success condition: HTTP `200` for valid secrets; HTTP `401` means the secret is
+  missing or incorrect.
+- Confirm jobs are working by opening `/api/health` and checking that stale
+  warnings clear and timestamps move forward.
+
+If `base_coins` has not been migrated yet, coin endpoints still return live
+DexScreener fallback data. Coin discovery will return a warning and
+`persistenceAvailable: false` instead of failing the whole request.
+
 ## Refresh Monitoring
 
 Every authorized metrics refresh records one operational row in `refresh_runs`.
@@ -1061,6 +1113,10 @@ Production recommendation:
 - Farcaster/social discovery lives in `lib/social/`.
 - Public-source candidate discovery lives in `lib/discovery/`.
 - Token trend reads and future adapters live in `lib/tokens/`.
+- Coin schema checks and typed coin models live in `lib/coins/`.
+- Coin ranking and app ranking snapshots live in `lib/ranking/`.
+- Coin risk scoring lives in `lib/risk/` and `lib/scoring/coins.ts`.
+- Shared external cron authentication lives in `lib/cronAuth.ts`.
 - Refresh observability lives in `refresh_runs` and `/api/admin/refresh-runs`.
 - Trend ranking lives in `lib/scoring.ts`.
 - Submit validation lives in `lib/validation.ts`.
@@ -1083,4 +1139,7 @@ Not implemented yet:
 npm run typecheck
 npm run lint
 npm run build
+npm run verify:production
+npm run verify:coins
+npm run verify:api
 ```

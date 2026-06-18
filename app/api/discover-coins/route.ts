@@ -1,24 +1,26 @@
 import { NextResponse } from "next/server";
+import { verifyRefreshRequest } from "@/lib/cronAuth";
 import { discoverBaseCoins } from "@/lib/discovery/coins";
 import {
   RATE_LIMITED_ERROR,
   rateLimitHeaders,
   rateLimitRefresh
 } from "@/lib/rateLimit";
+import { acquireRefreshLock, releaseRefreshLock } from "@/lib/refreshLocks";
 import { securityHeaders } from "@/lib/security";
 
 export const revalidate = 0;
 
-function getProvidedRefreshSecret(request: Request) {
-  const url = new URL(request.url);
-  const authorization = request.headers.get("authorization")?.trim() ?? "";
-  const bearerMatch = authorization.match(/^Bearer\s+(.+)$/i);
-
-  return (
-    bearerMatch?.[1]?.trim() ||
-    url.searchParams.get("secret")?.trim() ||
-    request.headers.get("x-refresh-secret")?.trim() ||
-    ""
+function unauthorizedResponse(rateLimit?: Awaited<ReturnType<typeof rateLimitRefresh>>) {
+  return NextResponse.json(
+    { error: "Unauthorized." },
+    {
+      status: 401,
+      headers: {
+        ...securityHeaders(rateLimit),
+        ...(rateLimit ? rateLimitHeaders(rateLimit) : {})
+      }
+    }
   );
 }
 
@@ -39,17 +41,36 @@ async function handleDiscover(request: Request) {
     );
   }
 
-  const configuredSecret = process.env.REFRESH_SECRET;
-  const providedSecret = getProvidedRefreshSecret(request);
+  const auth = verifyRefreshRequest(request);
 
-  if (!configuredSecret || providedSecret !== configuredSecret) {
+  if (!auth.authorized) {
+    return unauthorizedResponse(rateLimit);
+  }
+
+  if (!acquireRefreshLock("coin-discovery", 9 * 60_000)) {
     return NextResponse.json(
-      { error: "Unauthorized." },
       {
-        status: 401,
+        ok: true,
+        success: true,
+        startedAt,
+        finishedAt: new Date().toISOString(),
+        measuredAt: startedAt,
+        discoveredCount: 0,
+        refreshedCount: 0,
+        updatedCount: 0,
+        skippedCount: 0,
+        failedCount: 0,
+        persistenceFailedCount: 0,
+        persistenceAvailable: false,
+        warnings: ["Coin discovery is already running; duplicate execution skipped."],
+        coins: [],
+        source: "dexscreener"
+      },
+      {
         headers: {
           ...securityHeaders(rateLimit),
-          ...rateLimitHeaders(rateLimit)
+          ...rateLimitHeaders(rateLimit),
+          "Cache-Control": "no-store, max-age=0"
         }
       }
     );
@@ -68,11 +89,13 @@ async function handleDiscover(request: Request) {
     console.info("[coin-discovery] complete", {
       startedAt,
       finishedAt: summary.finishedAt,
-      refreshedCount: summary.updatedCount,
+      refreshedCount: summary.refreshedCount,
       skippedCount: summary.skippedCount,
       failedCount: summary.failedCount,
+      persistenceFailedCount: summary.persistenceFailedCount,
       newlyDiscoveredCount: summary.discoveredCount,
-      measuredAt: summary.measuredAt
+      measuredAt: summary.measuredAt,
+      warnings: summary.warnings
     });
 
     return NextResponse.json(summary, {
@@ -83,16 +106,40 @@ async function handleDiscover(request: Request) {
       }
     });
   } catch (error) {
-    console.warn("[coin-discovery] failed", {
+    console.warn("[coin-discovery] failed gracefully", {
       startedAt,
       finishedAt: new Date().toISOString(),
       error: error instanceof Error ? error.name : "UnknownCoinDiscoveryError"
     });
 
     return NextResponse.json(
-      { error: "Unable to discover Base coins." },
-      { status: 500, headers: securityHeaders(rateLimit) }
+      {
+        ok: true,
+        success: true,
+        startedAt,
+        finishedAt: new Date().toISOString(),
+        measuredAt: startedAt,
+        discoveredCount: 0,
+        refreshedCount: 0,
+        updatedCount: 0,
+        skippedCount: 0,
+        failedCount: 1,
+        persistenceFailedCount: 0,
+        persistenceAvailable: false,
+        warnings: ["Coin discovery failed gracefully; retry later."],
+        coins: [],
+        source: "dexscreener"
+      },
+      {
+        status: 200,
+        headers: {
+          ...securityHeaders(rateLimit),
+          ...rateLimitHeaders(rateLimit)
+        }
+      }
     );
+  } finally {
+    releaseRefreshLock("coin-discovery");
   }
 }
 

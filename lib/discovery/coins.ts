@@ -1,5 +1,7 @@
 import "server-only";
 
+import type { BaseCoin } from "@/lib/coins/types";
+import { checkCoinSchemaStatus } from "@/lib/coins/schema";
 import { tokenTrendToCoin } from "@/lib/ranking/coins";
 import {
   createSupabaseAdminClient,
@@ -14,13 +16,19 @@ interface ExistingCoinRow {
 
 export interface CoinDiscoverySummary {
   ok: true;
+  success: true;
   startedAt: string;
   finishedAt: string;
   measuredAt: string;
   discoveredCount: number;
+  refreshedCount: number;
   updatedCount: number;
   skippedCount: number;
   failedCount: number;
+  persistenceFailedCount: number;
+  persistenceAvailable: boolean;
+  warnings: string[];
+  coins: BaseCoin[];
   source: "dexscreener";
 }
 
@@ -68,23 +76,33 @@ function toDbRow(coin: NonNullable<ReturnType<typeof tokenTrendToCoin>>) {
 
 export async function discoverBaseCoins(options: { limitPerBucket?: number } = {}) {
   const startedAt = new Date().toISOString();
+  const warnings: string[] = [];
+  const measuredAt = new Date().toISOString();
+  let radar: Awaited<ReturnType<typeof fetchDexScreenerBaseTokenRadar>>;
 
-  if (!isSupabaseAdminConfigured()) {
+  try {
+    radar = await fetchDexScreenerBaseTokenRadar(options.limitPerBucket ?? 30);
+  } catch {
+    warnings.push("DexScreener discovery source is temporarily unavailable.");
     return {
       ok: true,
+      success: true,
       startedAt,
       finishedAt: new Date().toISOString(),
-      measuredAt: startedAt,
+      measuredAt,
       discoveredCount: 0,
+      refreshedCount: 0,
       updatedCount: 0,
       skippedCount: 0,
       failedCount: 1,
+      persistenceFailedCount: 0,
+      persistenceAvailable: false,
+      warnings,
+      coins: [],
       source: "dexscreener" as const
     };
   }
 
-  const measuredAt = new Date().toISOString();
-  const radar = await fetchDexScreenerBaseTokenRadar(options.limitPerBucket ?? 30);
   const uniqueCoins = new Map<string, NonNullable<ReturnType<typeof tokenTrendToCoin>>>();
   let skippedCount = 0;
 
@@ -107,17 +125,54 @@ export async function discoverBaseCoins(options: { limitPerBucket?: number } = {
   }
 
   const coins = [...uniqueCoins.values()];
+  const schemaStatus = await checkCoinSchemaStatus();
+  const persistenceAvailable = schemaStatus.available && isSupabaseAdminConfigured();
 
   if (coins.length === 0) {
     return {
       ok: true,
+      success: true,
       startedAt,
       finishedAt: new Date().toISOString(),
       measuredAt,
       discoveredCount: 0,
+      refreshedCount: 0,
       updatedCount: 0,
       skippedCount,
       failedCount: 0,
+      persistenceFailedCount: 0,
+      persistenceAvailable,
+      warnings,
+      coins: [],
+      source: "dexscreener" as const
+    };
+  }
+
+  if (!persistenceAvailable) {
+    warnings.push(
+      schemaStatus.error ??
+        "Coin persistence is unavailable because the Supabase migration has not been applied."
+    );
+
+    if (!isSupabaseAdminConfigured()) {
+      warnings.push("Supabase admin client is not configured; skipping coin persistence.");
+    }
+
+    return {
+      ok: true,
+      success: true,
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      measuredAt,
+      discoveredCount: coins.length,
+      refreshedCount: 0,
+      updatedCount: 0,
+      skippedCount,
+      failedCount: 0,
+      persistenceFailedCount: coins.length,
+      persistenceAvailable: false,
+      warnings,
+      coins: coins.slice(0, 50),
       source: "dexscreener" as const
     };
   }
@@ -146,15 +201,22 @@ export async function discoverBaseCoins(options: { limitPerBucket?: number } = {
     .upsert(rows, { onConflict: "token_address" });
 
   if (error) {
+    warnings.push("Coin persistence write failed; discovery results were returned without storing them.");
     return {
       ok: true,
+      success: true,
       startedAt,
       finishedAt: new Date().toISOString(),
       measuredAt,
       discoveredCount: 0,
+      refreshedCount: 0,
       updatedCount: 0,
       skippedCount,
-      failedCount: rows.length,
+      failedCount: 0,
+      persistenceFailedCount: rows.length,
+      persistenceAvailable: true,
+      warnings,
+      coins: coins.slice(0, 50),
       source: "dexscreener" as const
     };
   }
@@ -165,13 +227,19 @@ export async function discoverBaseCoins(options: { limitPerBucket?: number } = {
 
   return {
     ok: true,
+    success: true,
     startedAt,
     finishedAt: new Date().toISOString(),
     measuredAt,
     discoveredCount,
+    refreshedCount: rows.length - discoveredCount,
     updatedCount: rows.length - discoveredCount,
     skippedCount,
     failedCount: 0,
+    persistenceFailedCount: 0,
+    persistenceAvailable: true,
+    warnings,
+    coins: coins.slice(0, 50),
     source: "dexscreener" as const
   };
 }

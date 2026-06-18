@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import {
   APP_METRIC_STALE_AFTER_MINUTES,
-  COIN_DISCOVERY_CRON_FREQUENCY,
+  COIN_DISCOVERY_STALE_AFTER_MINUTES,
   COIN_METRIC_STALE_AFTER_MINUTES,
-  METRICS_CRON_FREQUENCY,
   USE_MOCK_DATA
 } from "@/lib/constants";
+import { checkCoinSchemaStatus } from "@/lib/coins/schema";
 import {
   createSupabaseAdminClient,
   isSupabaseAdminConfigured
@@ -16,78 +16,24 @@ import {
 } from "@/lib/supabase/server";
 import { securityHeaders } from "@/lib/security";
 
-async function getHealthCounts() {
-  if (!isSupabaseServerConfigured()) {
-    return {
-      appCount: 0,
-      coinCount: 0,
-      appLastUpdated: null as string | null,
-      coinLastUpdated: null as string | null
-    };
-  }
-
-  const supabase = createSupabaseServerClient();
-  const [
-    appCountResult,
-    coinCountResult,
-    latestMetricResult,
-    latestCoinResult
-  ] = await Promise.all([
-    supabase
-      .from("apps")
-      .select("id", { count: "exact", head: true })
-      .eq("status", "approved"),
-    supabase
-      .from("base_coins")
-      .select("id", { count: "exact", head: true })
-      .neq("verification_status", "rejected"),
-    supabase
-      .from("app_metrics")
-      .select("measured_at")
-      .order("measured_at", { ascending: false })
-      .limit(1)
-      .maybeSingle(),
-    supabase
-      .from("base_coins")
-      .select("measured_at")
-      .order("measured_at", { ascending: false })
-      .limit(1)
-      .maybeSingle()
-  ]);
-
-  return {
-    appCount: appCountResult.count ?? 0,
-    coinCount: coinCountResult.count ?? 0,
-    appLastUpdated:
-      latestMetricResult.data &&
-      "measured_at" in latestMetricResult.data
-        ? String(latestMetricResult.data.measured_at)
-        : null,
-    coinLastUpdated:
-      latestCoinResult.data &&
-      "measured_at" in latestCoinResult.data
-        ? String(latestCoinResult.data.measured_at)
-        : null
-  };
+interface HealthCounts {
+  appCount: number;
+  coinCount: number;
+  appLastUpdated: string | null;
+  coinLastUpdated: string | null;
+  lastCoinDiscoveryAt: string | null;
+  latestRefreshStatus: string | null;
+  warnings: string[];
 }
 
-async function getLatestRefreshStatus() {
-  if (!isSupabaseAdminConfigured()) {
-    return null;
+function runtimeMode() {
+  if (USE_MOCK_DATA) {
+    return "mock" as const;
   }
 
-  try {
-    const { data } = await createSupabaseAdminClient()
-      .from("refresh_runs")
-      .select("status")
-      .order("started_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    return data?.status ? String(data.status) : null;
-  } catch {
-    return null;
-  }
+  return process.env.NODE_ENV === "production"
+    ? "production" as const
+    : "development" as const;
 }
 
 function latestTimestamp(...timestamps: Array<string | null>) {
@@ -109,31 +55,203 @@ function isStale(timestamp: string | null, staleAfterMinutes: number) {
   return !Number.isFinite(parsed) || Date.now() - parsed > staleAfterMinutes * 60_000;
 }
 
+function firstTimestamp(data: unknown, key: string) {
+  if (data && typeof data === "object" && key in data) {
+    const value = (data as Record<string, unknown>)[key];
+    return typeof value === "string" ? value : null;
+  }
+
+  return null;
+}
+
+async function getLatestRefreshStatus() {
+  if (!isSupabaseAdminConfigured()) {
+    return null;
+  }
+
+  try {
+    const { data } = await createSupabaseAdminClient()
+      .from("refresh_runs")
+      .select("status")
+      .order("started_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    return data?.status ? String(data.status) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function getHealthCounts(): Promise<HealthCounts> {
+  const warnings: string[] = [];
+
+  if (!isSupabaseServerConfigured()) {
+    return {
+      appCount: 0,
+      coinCount: 0,
+      appLastUpdated: null,
+      coinLastUpdated: null,
+      lastCoinDiscoveryAt: null,
+      latestRefreshStatus: null,
+      warnings: ["Supabase is not configured."]
+    };
+  }
+
+  const supabase = createSupabaseServerClient();
+  const coinSchemaStatus = await checkCoinSchemaStatus();
+  const checks = await Promise.allSettled([
+    supabase
+      .from("apps")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "approved"),
+    supabase
+      .from("app_metrics")
+      .select("measured_at")
+      .order("measured_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    coinSchemaStatus.available
+      ? supabase
+          .from("base_coins")
+          .select("id", { count: "exact", head: true })
+          .neq("verification_status", "rejected")
+      : Promise.resolve({ count: 0, error: null }),
+    coinSchemaStatus.available
+      ? supabase
+          .from("base_coins")
+          .select("measured_at, last_seen_at")
+          .order("measured_at", { ascending: false })
+          .limit(1)
+          .maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+    getLatestRefreshStatus()
+  ]);
+
+  const [appCountResult, latestMetricResult, coinCountResult, latestCoinResult, statusResult] = checks;
+
+  if (!coinSchemaStatus.available) {
+    warnings.push(
+      coinSchemaStatus.error ??
+        "Coin persistence is unavailable because the Supabase migration has not been applied."
+    );
+  }
+
+  if (appCountResult.status === "rejected" || appCountResult.value.error) {
+    warnings.push("Approved app count could not be read from Supabase.");
+  }
+
+  if (latestMetricResult.status === "rejected" || latestMetricResult.value.error) {
+    warnings.push("Latest app metric timestamp could not be read from Supabase.");
+  }
+
+  if (coinCountResult.status === "rejected" || coinCountResult.value.error) {
+    warnings.push("Coin count could not be read from Supabase.");
+  }
+
+  if (latestCoinResult.status === "rejected" || latestCoinResult.value.error) {
+    warnings.push("Latest coin timestamp could not be read from Supabase.");
+  }
+
+  const coinData = latestCoinResult.status === "fulfilled"
+    ? latestCoinResult.value.data
+    : null;
+
+  return {
+    appCount: appCountResult.status === "fulfilled"
+      ? appCountResult.value.count ?? 0
+      : 0,
+    coinCount: coinCountResult.status === "fulfilled"
+      ? coinCountResult.value.count ?? 0
+      : 0,
+    appLastUpdated: latestMetricResult.status === "fulfilled"
+      ? firstTimestamp(latestMetricResult.value.data, "measured_at")
+      : null,
+    coinLastUpdated: firstTimestamp(coinData, "measured_at"),
+    lastCoinDiscoveryAt: firstTimestamp(coinData, "last_seen_at"),
+    latestRefreshStatus: statusResult.status === "fulfilled"
+      ? statusResult.value
+      : null,
+    warnings
+  };
+}
+
 export async function GET() {
-  const counts = await getHealthCounts();
-  const latestRefreshStatus = await getLatestRefreshStatus();
+  const counts = await getHealthCounts().catch(() => ({
+    appCount: 0,
+    coinCount: 0,
+    appLastUpdated: null,
+    coinLastUpdated: null,
+    lastCoinDiscoveryAt: null,
+    latestRefreshStatus: null,
+    warnings: ["Health checks failed gracefully."]
+  }));
+  const coinSchemaStatus = await checkCoinSchemaStatus();
   const globalLastUpdated = latestTimestamp(
     counts.appLastUpdated,
     counts.coinLastUpdated
   );
+  const isAppDataStale = isStale(
+    counts.appLastUpdated,
+    APP_METRIC_STALE_AFTER_MINUTES
+  );
+  const isCoinDataStale = isStale(
+    counts.coinLastUpdated,
+    COIN_METRIC_STALE_AFTER_MINUTES
+  );
+  const isCoinDiscoveryStale = isStale(
+    counts.lastCoinDiscoveryAt,
+    COIN_DISCOVERY_STALE_AFTER_MINUTES
+  );
+  const warnings = [...counts.warnings];
+
+  if (isAppDataStale) {
+    warnings.push(
+      "App data is stale because the latest successful metrics refresh was more than 2 hours ago."
+    );
+  }
+
+  if (isCoinDataStale) {
+    warnings.push(
+      "Coin market data is stale or unavailable; live DexScreener fallback may be used by coin endpoints."
+    );
+  }
+
+  if (isCoinDiscoveryStale) {
+    warnings.push(
+      "Coin discovery is stale or has not persisted yet; cron-job.org should call the discovery endpoint."
+    );
+  }
+
+  const status = warnings.length > 0 ? "degraded" : "healthy";
 
   return NextResponse.json(
     {
       ok: true,
+      status,
       app: "base-radar",
-      mode: USE_MOCK_DATA ? "mock" : "supabase",
+      mode: runtimeMode(),
       supabaseConfigured: isSupabaseServerConfigured(),
+      coinSchemaAvailable: coinSchemaStatus.available,
+      schedulerMode: "external-cron",
       appCount: counts.appCount,
       coinCount: counts.coinCount,
       globalLastUpdated,
-      isDataStale:
-        isStale(counts.appLastUpdated, APP_METRIC_STALE_AFTER_MINUTES) ||
-        isStale(counts.coinLastUpdated, COIN_METRIC_STALE_AFTER_MINUTES),
+      coinLastUpdated: counts.coinLastUpdated,
+      lastCoinDiscoveryAt: counts.lastCoinDiscoveryAt,
+      lastCoinRefreshAt: counts.coinLastUpdated,
+      lastAppRefreshAt: counts.appLastUpdated,
+      latestRefreshStatus: counts.latestRefreshStatus,
+      isAppDataStale,
+      isCoinDataStale,
+      isCoinDiscoveryStale,
       cronFrequency: {
-        metrics: METRICS_CRON_FREQUENCY,
-        coinDiscovery: COIN_DISCOVERY_CRON_FREQUENCY
+        metrics: "external: every 60 minutes",
+        coinDiscovery: "external: every 10 minutes",
+        coinRefresh: "external: every 15 minutes",
+        vercelBackup: "daily"
       },
-      latestRefreshStatus,
+      warnings: [...new Set(warnings)],
       timestamp: new Date().toISOString()
     },
     { headers: securityHeaders() }

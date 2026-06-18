@@ -99,6 +99,18 @@ await check("/api/coins returns ranked coins", async () => {
   assert(response.status === 200, `Expected 200, got ${response.status}.`);
   assert(Array.isArray(body?.data), "data must be an array.");
   assert(body.meta?.calculatedAt, "calculatedAt is missing.");
+  assert(
+    ["persisted", "dexscreener-fallback", "stale-cache"].includes(body.meta?.source),
+    "source meta is invalid."
+  );
+  assert(
+    ["available", "unavailable", "empty"].includes(body.meta?.persistence),
+    "persistence meta is invalid."
+  );
+  assert(typeof body.meta?.persistenceAvailable === "boolean", "persistenceAvailable is missing.");
+  if (body.meta.persistenceAvailable === false) {
+    assert(body.meta.warning || body.meta.warnings?.length, "fallback warning should be present.");
+  }
 
   if (body.data.length === 0) {
     return "coin list empty; discovery may not have run yet.";
@@ -154,7 +166,36 @@ await check("coin discovery accepts valid secret when configured", async () => {
   assert(body?.ok === true, "Discovery summary ok should be true.");
   assert(typeof body.discoveredCount === "number", "discoveredCount missing.");
   assert(typeof body.updatedCount === "number", "updatedCount missing.");
-  return `discovered=${body.discoveredCount}, updated=${body.updatedCount}, failed=${body.failedCount}.`;
+  assert(typeof body.persistenceFailedCount === "number", "persistenceFailedCount missing.");
+  assert(typeof body.persistenceAvailable === "boolean", "persistenceAvailable missing.");
+  return `discovered=${body.discoveredCount}, updated=${body.updatedCount}, failed=${body.failedCount}, persistenceFailed=${body.persistenceFailedCount}.`;
+});
+
+await check("coin discovery is idempotent enough for repeated cron calls", async () => {
+  const secret = process.env.REFRESH_SECRET?.trim();
+
+  if (!secret) {
+    return "skipped; REFRESH_SECRET not configured.";
+  }
+
+  const first = await fetchJson("/api/discover-coins?limit=8", {
+    headers: { authorization: `Bearer ${secret}` }
+  });
+  const second = await fetchJson("/api/discover-coins?limit=8", {
+    headers: { authorization: `Bearer ${secret}` }
+  });
+
+  assert(first.response.status !== 401, "First valid discovery call returned 401.");
+  assert(second.response.status !== 401, "Second valid discovery call returned 401.");
+
+  const coins = Array.isArray(second.body?.coins) ? second.body.coins : [];
+  const addresses = coins
+    .map((coin) => coin.tokenAddress)
+    .filter(Boolean)
+    .map((address) => String(address).toLowerCase());
+  assert(new Set(addresses).size === addresses.length, "Duplicate token addresses in discovery output.");
+
+  return `first=${first.response.status}, second=${second.response.status}, coins=${coins.length}.`;
 });
 
 printResults();

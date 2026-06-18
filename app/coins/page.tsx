@@ -124,6 +124,12 @@ export default async function CoinsPage({
           </Link>
         </section>
 
+        {snapshot.warnings.length > 0 ? (
+          <section className="mt-6 rounded-lg border border-amber-400/20 bg-amber-400/10 p-4 text-sm leading-6 text-amber-50/85">
+            {snapshot.warnings[0]}
+          </section>
+        ) : null}
+
         <section className="mt-6 overflow-hidden rounded-lg border border-white/10 bg-[#07111f]">
           <div className="hidden grid-cols-[54px_1.35fr_0.75fr_0.8fr_0.8fr_0.75fr_0.75fr_0.8fr_0.85fr] gap-3 border-b border-white/10 px-4 py-3 text-xs uppercase tracking-[0.12em] text-muted-foreground lg:grid">
             <span>Rank</span>

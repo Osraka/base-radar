@@ -30,6 +30,7 @@
     "verify-token-factory-discovery": "node scripts/verify-token-factory-discovery.mjs",
     "verify-token-snapshots": "node scripts/verify-token-snapshots.mjs",
     "verify:coins": "node scripts/verify-coins.mjs",
+    "verify:api": "node scripts/verify-api.mjs",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit --incremental false"
   },

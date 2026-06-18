@@ -12,6 +12,7 @@ import type {
   CoinVerificationStatus,
   RankedCoin
 } from "@/lib/coins/types";
+import { checkCoinSchemaStatus } from "@/lib/coins/schema";
 import { calculateCoinTrendScore } from "@/lib/scoring/coins";
 import { sanitizeText } from "@/lib/security";
 import {
@@ -69,6 +70,14 @@ export interface CoinQueryOptions {
   risk?: "all" | "lower" | "high";
   verifiedOnly?: boolean;
   newOnly?: boolean;
+}
+
+interface CoinCandidateLoadResult {
+  coins: BaseCoin[];
+  source: CoinRankingSnapshot["source"];
+  persistence: CoinRankingSnapshot["persistence"];
+  persistenceAvailable: boolean;
+  warnings: string[];
 }
 
 function toNumber(value: number | string | null | undefined) {
@@ -304,9 +313,15 @@ function applyCoinFilters(coins: BaseCoin[], options: CoinQueryOptions) {
   });
 }
 
-async function getCoinsFromSupabase(limit: number): Promise<BaseCoin[]> {
+async function getCoinsFromSupabase(limit: number): Promise<{
+  coins: BaseCoin[];
+  warning?: string;
+}> {
   if (!isSupabaseServerConfigured()) {
-    return [];
+    return {
+      coins: [],
+      warning: "Supabase is not configured; using live DexScreener fallback."
+    };
   }
 
   try {
@@ -318,12 +333,20 @@ async function getCoinsFromSupabase(limit: number): Promise<BaseCoin[]> {
       .limit(Math.max(20, Math.min(limit * 3, 300)));
 
     if (error) {
-      return [];
+      return {
+        coins: [],
+        warning: "Persisted coin data could not be read; using live DexScreener fallback."
+      };
     }
 
-    return ((data ?? []) as BaseCoinRow[]).map(rowToCoin);
+    return {
+      coins: ((data ?? []) as BaseCoinRow[]).map(rowToCoin)
+    };
   } catch {
-    return [];
+    return {
+      coins: [],
+      warning: "Persisted coin data read failed; using live DexScreener fallback."
+    };
   }
 }
 
@@ -347,10 +370,77 @@ async function getFallbackCoins(limit: number): Promise<BaseCoin[]> {
   return [...byAddress.values()];
 }
 
+async function loadCoinCandidates(limit: number): Promise<CoinCandidateLoadResult> {
+  const warnings: string[] = [];
+  const schemaStatus = await checkCoinSchemaStatus();
+
+  if (schemaStatus.available) {
+    const persistedResult = await getCoinsFromSupabase(limit);
+
+    if (persistedResult.warning) {
+      warnings.push(persistedResult.warning);
+    }
+
+    if (persistedResult.coins.length > 0) {
+      return {
+        coins: persistedResult.coins,
+        source: "persisted",
+        persistence: "available",
+        persistenceAvailable: true,
+        warnings
+      };
+    }
+
+    warnings.push("Coin persistence is available but empty; using live DexScreener fallback.");
+
+    try {
+      return {
+        coins: await getFallbackCoins(limit),
+        source: "dexscreener-fallback",
+        persistence: "empty",
+        persistenceAvailable: true,
+        warnings
+      };
+    } catch {
+      warnings.push("DexScreener fallback is temporarily unavailable.");
+      return {
+        coins: [],
+        source: "stale-cache",
+        persistence: "empty",
+        persistenceAvailable: true,
+        warnings
+      };
+    }
+  }
+
+  warnings.push(
+    schemaStatus.error ??
+      "Coin persistence is unavailable because the Supabase migration has not been applied."
+  );
+
+  try {
+    return {
+      coins: await getFallbackCoins(limit),
+      source: "dexscreener-fallback",
+      persistence: "unavailable",
+      persistenceAvailable: false,
+      warnings
+    };
+  } catch {
+    warnings.push("DexScreener fallback is temporarily unavailable.");
+    return {
+      coins: [],
+      source: "stale-cache",
+      persistence: "unavailable",
+      persistenceAvailable: false,
+      warnings
+    };
+  }
+}
+
 export async function getRankedCoins(options: CoinQueryOptions = {}): Promise<RankedCoin[]> {
   const limit = Math.max(1, Math.min(options.limit ?? 100, 300));
-  const persistedCoins = await getCoinsFromSupabase(limit);
-  const coins = persistedCoins.length > 0 ? persistedCoins : await getFallbackCoins(limit);
+  const { coins } = await loadCoinCandidates(limit);
   const filteredCoins = applyCoinFilters(coins, options);
   const calculatedAt = new Date().toISOString();
 
@@ -375,16 +465,39 @@ export async function getRankedCoins(options: CoinQueryOptions = {}): Promise<Ra
 export async function getCoinRadarSnapshot(
   options: CoinQueryOptions = {}
 ): Promise<CoinRankingSnapshot> {
-  const coins = await getRankedCoins(options);
+  const limit = Math.max(1, Math.min(options.limit ?? 100, 300));
+  const candidateResult = await loadCoinCandidates(limit);
+  const filteredCoins = applyCoinFilters(candidateResult.coins, options);
+  const calculatedAt = new Date().toISOString();
+  const coins = sortCoins(filteredCoins, options.sort)
+    .slice(0, limit)
+    .map((coin, index) => {
+      const isStale = isCoinMetricStale(coin.measuredAt);
+
+      return {
+        ...coin,
+        rank: index + 1,
+        calculatedAt,
+        isStale,
+        sourceList: [coin.source],
+        ...(isStale
+          ? { staleReason: "Coin market metrics are older than the freshness window." }
+          : {})
+      };
+    });
   const latest = globalLastUpdated(coins);
 
   return {
     coins,
     globalLastUpdated: latest,
-    calculatedAt: coins[0]?.calculatedAt ?? new Date().toISOString(),
+    calculatedAt,
     isDataStale: isCoinMetricStale(latest),
     staleAfterMinutes: COIN_METRIC_STALE_AFTER_MINUTES,
-    discoveryStaleAfterMinutes: COIN_DISCOVERY_STALE_AFTER_MINUTES
+    discoveryStaleAfterMinutes: COIN_DISCOVERY_STALE_AFTER_MINUTES,
+    source: candidateResult.source,
+    persistence: candidateResult.persistence,
+    persistenceAvailable: candidateResult.persistenceAvailable,
+    warnings: candidateResult.warnings
   };
 }
 

@@ -61,7 +61,12 @@ export async function GET(request: Request) {
           calculatedAt: snapshot.calculatedAt,
           isDataStale: snapshot.isDataStale,
           staleAfterMinutes: snapshot.staleAfterMinutes,
-          discoveryStaleAfterMinutes: snapshot.discoveryStaleAfterMinutes
+          discoveryStaleAfterMinutes: snapshot.discoveryStaleAfterMinutes,
+          source: snapshot.source,
+          persistence: snapshot.persistence,
+          persistenceAvailable: snapshot.persistenceAvailable,
+          warning: snapshot.warnings[0] ?? null,
+          warnings: snapshot.warnings
         }
       },
       {
@@ -74,8 +79,29 @@ export async function GET(request: Request) {
     );
   } catch {
     return NextResponse.json(
-      { error: "Unable to load Base coins." },
-      { status: 500, headers: securityHeaders() }
+      {
+        data: [],
+        count: 0,
+        meta: {
+          globalLastUpdated: null,
+          calculatedAt: new Date().toISOString(),
+          isDataStale: true,
+          staleAfterMinutes: 20,
+          discoveryStaleAfterMinutes: 15,
+          source: "stale-cache",
+          persistence: "unavailable",
+          persistenceAvailable: false,
+          warning: "Coin data is temporarily unavailable.",
+          warnings: ["Coin data is temporarily unavailable."]
+        }
+      },
+      {
+        status: 200,
+        headers: {
+          ...securityHeaders(),
+          "Cache-Control": "no-store, max-age=0"
+        }
+      }
     );
   }
 }

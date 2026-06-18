@@ -159,12 +159,16 @@ await check("/api/health returns safe ok response", async () => {
   assert(response.status === 200, `Expected 200, got ${response.status}.`);
   assert(body?.ok === true, "Health ok should be true.");
   assert(body.app === "base-radar", "Unexpected app name.");
-  assert(["mock", "supabase"].includes(body.mode), "Unexpected mode.");
+  assert(["mock", "production", "development"].includes(body.mode), "Unexpected mode.");
   assert(typeof body.timestamp === "string", "timestamp should be a string.");
   assert(typeof body.supabaseConfigured === "boolean", "supabaseConfigured should be a boolean.");
+  assert(typeof body.coinSchemaAvailable === "boolean", "coinSchemaAvailable should be a boolean.");
+  assert(body.schedulerMode === "external-cron", "schedulerMode should be external-cron.");
   assert(typeof body.appCount === "number", "appCount should be a number.");
   assert(typeof body.coinCount === "number", "coinCount should be a number.");
-  assert(typeof body.isDataStale === "boolean", "isDataStale should be a boolean.");
+  assert(typeof body.isAppDataStale === "boolean", "isAppDataStale should be a boolean.");
+  assert(typeof body.isCoinDataStale === "boolean", "isCoinDataStale should be a boolean.");
+  assert(Array.isArray(body.warnings), "warnings should be an array.");
   assertNoObviousSecretStrings(text, "/api/health");
 
   return `mode=${body.mode}, apps=${body.appCount}, coins=${body.coinCount}.`;
@@ -216,6 +220,9 @@ await check("/api/coins returns ranked coin data", async () => {
 
   assert(response.status === 200, `Expected 200, got ${response.status}.`);
   assert(Array.isArray(body?.data), "data should be an array.");
+  assert(body.meta?.source, "coin source meta is missing.");
+  assert(body.meta?.persistence, "coin persistence meta is missing.");
+  assert(typeof body.meta?.persistenceAvailable === "boolean", "coin persistence availability is missing.");
   assertNoObviousSecretStrings(text, "/api/coins");
 
   if (body.data.length === 0) {
