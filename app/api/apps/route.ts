@@ -48,6 +48,7 @@ export async function GET(request: Request) {
         count: apps.length,
         meta: {
           globalLastUpdated: snapshot.globalLastUpdated,
+          calculatedAt: snapshot.calculatedAt,
           isDataStale: snapshot.isDataStale,
           staleAfterMinutes: snapshot.staleAfterMinutes
         }

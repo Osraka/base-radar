@@ -67,6 +67,7 @@ export type AppWithMetrics = BaseApp & {
 export interface RadarSnapshot {
   apps: AppWithMetrics[];
   globalLastUpdated: string | null;
+  calculatedAt?: string;
   isDataStale: boolean;
   staleAfterMinutes: number;
 }

@@ -6,8 +6,10 @@ import {
   Activity,
   ArrowRight,
   BarChart3,
+  Coins,
   Gauge,
   LineChart,
+  Radar as RadarIcon,
   RotateCcw,
   Rocket,
   ShieldCheck,
@@ -257,6 +259,28 @@ export function DashboardClient({
               >
                 Submit Your App
               </Link>
+            </div>
+            <div className="mt-5 flex flex-wrap gap-2">
+              {[
+                { label: "Apps", href: "#trending", icon: RadarIcon },
+                { label: "Coins", href: "/coins", icon: Coins },
+                { label: "New Coins", href: "/coins?new=true&sort=newest", icon: Rocket },
+                { label: "Hot Emerging", href: "/coins?sort=volume1h", icon: LineChart },
+                { label: "High Confidence", href: "/coins?verified=true&risk=lower", icon: ShieldCheck }
+              ].map((item) => {
+                const ItemIcon = item.icon;
+
+                return (
+                  <Link
+                    key={item.label}
+                    href={item.href}
+                    className="inline-flex h-9 items-center gap-2 rounded-md border border-white/10 bg-white/[0.035] px-3 text-sm font-medium text-muted-foreground transition hover:border-primary/40 hover:text-white"
+                  >
+                    <ItemIcon className="h-4 w-4" />
+                    {item.label}
+                  </Link>
+                );
+              })}
             </div>
             <DataFreshness
               lastUpdated={globalLastUpdated}

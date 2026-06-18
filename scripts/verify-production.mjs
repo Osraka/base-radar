@@ -149,6 +149,7 @@ loadEnvFile(".env.local");
 loadEnvFile(".env");
 
 let firstAppSlug = "";
+let firstCoinAddress = "";
 
 await check("/api/health returns safe ok response", async () => {
   const response = await fetchWithTimeout(apiUrl("/api/health"));
@@ -160,9 +161,13 @@ await check("/api/health returns safe ok response", async () => {
   assert(body.app === "base-radar", "Unexpected app name.");
   assert(["mock", "supabase"].includes(body.mode), "Unexpected mode.");
   assert(typeof body.timestamp === "string", "timestamp should be a string.");
+  assert(typeof body.supabaseConfigured === "boolean", "supabaseConfigured should be a boolean.");
+  assert(typeof body.appCount === "number", "appCount should be a number.");
+  assert(typeof body.coinCount === "number", "coinCount should be a number.");
+  assert(typeof body.isDataStale === "boolean", "isDataStale should be a boolean.");
   assertNoObviousSecretStrings(text, "/api/health");
 
-  return `mode=${body.mode}.`;
+  return `mode=${body.mode}, apps=${body.appCount}, coins=${body.coinCount}.`;
 });
 
 await check("Homepage returns 200", async () => {
@@ -204,6 +209,41 @@ await check("App detail page returns 200", async () => {
   return `/apps/${firstAppSlug} reachable.`;
 });
 
+await check("/api/coins returns ranked coin data", async () => {
+  const response = await fetchWithTimeout(apiUrl("/api/coins?limit=40"));
+  const text = await readText(response);
+  const body = parseJson(text, "/api/coins");
+
+  assert(response.status === 200, `Expected 200, got ${response.status}.`);
+  assert(Array.isArray(body?.data), "data should be an array.");
+  assertNoObviousSecretStrings(text, "/api/coins");
+
+  if (body.data.length === 0) {
+    return "coin data empty; discovery may not have run yet.";
+  }
+
+  assert(typeof body.data[0]?.tokenAddress === "string", "first coin address is missing.");
+  assert(typeof body.data[0]?.rank === "number", "coin rank is missing.");
+  firstCoinAddress = body.data[0].tokenAddress;
+  return `coins=${body.data.length}, first=${body.data[0].symbol ?? firstCoinAddress}.`;
+});
+
+await check("Coin detail page returns 200 when a coin exists", async () => {
+  if (!firstCoinAddress) {
+    return "skipped; no coin from /api/coins.";
+  }
+
+  const response = await fetchWithTimeout(
+    apiUrl(`/coins/${encodeURIComponent(firstCoinAddress)}`)
+  );
+  const text = await readText(response);
+
+  assert(response.status === 200, `Expected 200, got ${response.status}.`);
+  assertNoObviousSecretStrings(text, "coin detail page");
+
+  return `/coins/${firstCoinAddress} reachable.`;
+});
+
 await check("/api/refresh-metrics rejects missing secret", async () => {
   const response = await fetchWithTimeout(apiUrl("/api/refresh-metrics"), {
     method: "GET"
@@ -224,6 +264,18 @@ await check("/api/admin/refresh-runs rejects missing secret", async () => {
 
   assert(response.status === 401, `Expected 401, got ${response.status}.`);
   assertNoObviousSecretStrings(text, "/api/admin/refresh-runs");
+
+  return "missing secret rejected.";
+});
+
+await check("/api/discover-coins rejects missing secret", async () => {
+  const response = await fetchWithTimeout(apiUrl("/api/discover-coins"), {
+    method: "GET"
+  });
+  const text = await readText(response);
+
+  assert(response.status === 401, `Expected 401, got ${response.status}.`);
+  assertNoObviousSecretStrings(text, "/api/discover-coins");
 
   return "missing secret rejected.";
 });

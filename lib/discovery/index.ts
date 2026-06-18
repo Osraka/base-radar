@@ -1,5 +1,6 @@
 import "server-only";
 
+import { isValidEthereumAddress } from "@/lib/security";
 import { fetchDefiLlamaBaseCandidates } from "@/lib/discovery/defillama";
 import { getManualVerifiedListCandidates } from "@/lib/discovery/manual";
 import type { CandidateAppDiscovery } from "@/lib/discovery/types";
@@ -13,7 +14,22 @@ function dedupeCandidates(candidates: CandidateAppDiscovery[]) {
   const seenKeys = new Set<string>();
 
   return candidates.filter((candidate) => {
-    const key = `${candidate.source}:${candidate.sourceUrl || candidate.slug || candidate.name}`.toLowerCase();
+    const websiteHost = candidate.websiteUrl
+      ? new URL(safeParseUrl(candidate.websiteUrl) ?? "https://invalid.local").hostname
+      : "";
+    const contractKey = (candidate.contractAddresses ?? [])
+      .map((address) => address.toLowerCase())
+      .sort()
+      .join(",");
+    const fuzzyName = candidate.name.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const key = [
+      candidate.slug?.toLowerCase(),
+      websiteHost,
+      contractKey,
+      fuzzyName
+    ]
+      .filter(Boolean)
+      .join(":");
 
     if (seenKeys.has(key)) {
       return false;
@@ -48,11 +64,22 @@ export async function upsertCandidateApps(candidates: CandidateAppDiscovery[]) {
     slug: candidate.slug ? sanitizeText(candidate.slug, 120) : null,
     category: candidate.category ?? null,
     website_url: candidate.websiteUrl ? safeParseUrl(candidate.websiteUrl) : null,
+    logo_url: candidate.logoUrl ? safeParseUrl(candidate.logoUrl) : null,
+    contract_addresses: (candidate.contractAddresses ?? []).filter(isValidEthereumAddress),
     source: candidate.source,
     source_url: safeParseUrl(candidate.sourceUrl) ?? candidate.sourceUrl,
     confidence: candidate.confidence,
-    status: "review",
-    notes: sanitizeText(candidate.notes, 500)
+    status: "needs_review",
+    discovery_reason: sanitizeText(
+      candidate.discoveryReason ?? candidate.notes,
+      300
+    ),
+    last_seen_at: new Date().toISOString(),
+    verification_status: "needs_review",
+    notes: sanitizeText(
+      [candidate.description, candidate.notes].filter(Boolean).join(" "),
+      500
+    )
   }));
 
   const { error } = await createSupabaseAdminClient()

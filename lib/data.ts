@@ -1,6 +1,11 @@
-import { APP_CATEGORIES, USE_MOCK_DATA } from "@/lib/constants";
+import {
+  APP_CATEGORIES,
+  APP_METRIC_STALE_AFTER_MINUTES,
+  USE_MOCK_DATA
+} from "@/lib/constants";
 import { mockApps, mockMetrics } from "@/lib/mockData";
-import { calculateTrendScore, rankApps } from "@/lib/scoring";
+import { rankAppSnapshot } from "@/lib/ranking/apps";
+import { calculateTrendScore } from "@/lib/scoring";
 import { isValidEthereumAddress, safeParseUrl, sanitizeText } from "@/lib/security";
 import {
   createSupabaseServerClient,
@@ -66,7 +71,7 @@ interface SupabaseMetricRow {
 
 const BUILDER_CODE_METRIC_RECENT_MS = 30 * 3_600_000;
 const PROTOCOL_ADAPTER_METRIC_RECENT_MS = 48 * 3_600_000;
-const DEFAULT_STALE_AFTER_MINUTES = 90;
+const DEFAULT_STALE_AFTER_MINUTES = APP_METRIC_STALE_AFTER_MINUTES;
 const METRIC_HISTORY_SELECT =
   "app_id, tx_24h, tx_7d, unique_users_24h, unique_users_7d, volume_24h, volume_7d, growth_24h, growth_7d, social_mentions_24h, social_mentions_7d, social_engagement_24h, social_engagement_7d, social_source, social_confidence, social_window, trend_score, source, confidence, volume_24h_usd, fees_24h_usd, revenue_24h_usd, tvl_usd, metric_origin, coverage, notes, measured_at";
 
@@ -186,15 +191,6 @@ function choosePreferredMetric(metrics: AppMetrics[]) {
   const mockMetric = metrics.find((metric) => metric.source === "mock");
 
   return protocolAdapterMetric ?? builderCodeMetric ?? baseRpcMetric ?? mockMetric ?? metrics[0];
-}
-
-function latestMeasuredAt(apps: AppWithMetrics[]) {
-  const latestTimestamp = apps.reduce((latest, app) => {
-    const timestamp = new Date(app.metrics.measuredAt).getTime();
-    return Number.isFinite(timestamp) ? Math.max(latest, timestamp) : latest;
-  }, 0);
-
-  return latestTimestamp > 0 ? new Date(latestTimestamp).toISOString() : null;
 }
 
 export function isSnapshotStale(
@@ -396,19 +392,11 @@ export async function getApps(): Promise<AppWithMetrics[]> {
 }
 
 export async function getRankedApps(): Promise<AppWithMetrics[]> {
-  return rankApps(await getApps());
+  return rankAppSnapshot(await getApps()).apps;
 }
 
 export async function getRadarSnapshot(): Promise<RadarSnapshot> {
-  const apps = await getRankedApps();
-  const globalLastUpdated = latestMeasuredAt(apps);
-
-  return {
-    apps,
-    globalLastUpdated,
-    isDataStale: isSnapshotStale(globalLastUpdated),
-    staleAfterMinutes: DEFAULT_STALE_AFTER_MINUTES
-  };
+  return rankAppSnapshot(await getApps());
 }
 
 export async function getAppBySlug(slug: string): Promise<AppWithMetrics | null> {

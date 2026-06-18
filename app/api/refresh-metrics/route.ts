@@ -870,9 +870,14 @@ async function handleRefresh(request: Request) {
     }
 
     console.info("[base-indexer] refresh complete", {
-      refreshed,
-      failed,
-      skipped,
+      startedAt: new Date(startedAt).toISOString(),
+      finishedAt: new Date().toISOString(),
+      refreshedCount: refreshed + protocolAdapterMetricRows + builderCodeMetricRows,
+      skippedCount: skipped,
+      failedCount:
+        failed + builderCodeBridgeErrors + protocolAdapterErrors + tokenSnapshotErrors,
+      newlyDiscoveredCount: tokenSnapshotRows,
+      measuredAt,
       fromBlock: fromBlock.toString(),
       toBlock: latestBlock.toString()
     });

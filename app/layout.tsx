@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Base Radar | DexScreener for Base Apps",
+  title: "Base Radar | Base App and Coin Discovery Engine",
   description:
-    "Discover what is trending across Base apps, builders, agents, and onchain growth."
+    "Real-time discovery engine for Base apps, protocols, agents, mini apps, and coins launching on Base."
 };
 
 export default function RootLayout({

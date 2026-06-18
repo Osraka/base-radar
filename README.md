@@ -41,6 +41,7 @@ HONEYPOT_CACHE_TTL_SECONDS=900
 DEX_FACTORY_BLOCK_RANGE=21600
 MAX_DEX_FACTORY_POOLS=80
 TOKEN_SNAPSHOT_LIMIT_PER_BUCKET=25
+COIN_DISCOVERY_LIMIT_PER_BUCKET=30
 BASE_TOKEN_WATCHLIST_JSON=[]
 BASE_TOKEN_WATCHLIST_WALLETS=
 SMART_WALLET_BLOCK_RANGE=7200
@@ -48,7 +49,7 @@ NEYNAR_API_KEY=
 NEYNAR_CACHE_TTL_SECONDS=1800
 ```
 
-Only `NEXT_PUBLIC_*` values are safe for the browser. `SUPABASE_SERVICE_ROLE_KEY`, `UPSTASH_REDIS_REST_TOKEN`, `BASE_RPC_URL`, `REFRESH_SECRET`, `BASE_TOKEN_WATCHLIST_JSON`, `BASE_TOKEN_WATCHLIST_WALLETS`, and `NEYNAR_API_KEY` must stay server-side. Cache TTL and scanner-range values are not secrets, but they still belong in server/runtime env. `APP_URL` is not a secret, but it is used by local scripts. `SUPABASE_SERVICE_ROLE_KEY` is only for server-only admin tasks such as seeding, moderation, and future metrics jobs.
+Only `NEXT_PUBLIC_*` values are safe for the browser. `SUPABASE_SERVICE_ROLE_KEY`, `UPSTASH_REDIS_REST_TOKEN`, `BASE_RPC_URL`, `REFRESH_SECRET`, `BASE_TOKEN_WATCHLIST_JSON`, `BASE_TOKEN_WATCHLIST_WALLETS`, and `NEYNAR_API_KEY` must stay server-side. Cache TTL, scanner-range, and discovery-limit values are not secrets, but they still belong in server/runtime env. `APP_URL` is not a secret, but it is used by local scripts. `SUPABASE_SERVICE_ROLE_KEY` is only for server-only admin tasks such as seeding, moderation, and future metrics jobs.
 
 ## Public Source Policy
 
@@ -64,6 +65,8 @@ Current trend and discovery inputs are public or manually verified:
 - Farcaster/Neynar public API data when the configured API key has access
 - verified project documentation and official deployment sources
 - public market data APIs when token trend adapters are explicitly added
+- DexScreener public Base pair/token endpoints for token discovery, liquidity,
+  volume, and pair freshness signals
 
 Candidate discoveries are never automatically approved. New public-source
 discoveries land in `candidate_apps` with `status = review` until a human
@@ -91,6 +94,7 @@ MAX_INDEXER_APPS_PER_RUN=20
 DEFILLAMA_CACHE_TTL_SECONDS=1800
 DEXSCREENER_CACHE_TTL_SECONDS=300
 HONEYPOT_CACHE_TTL_SECONDS=900
+COIN_DISCOVERY_LIMIT_PER_BUCKET=30
 BASE_TOKEN_WATCHLIST_JSON=[]
 BASE_TOKEN_WATCHLIST_WALLETS=
 SMART_WALLET_BLOCK_RANGE=7200
@@ -617,16 +621,36 @@ Token trends:
 - `SMART_WALLET_BLOCK_RANGE` is capped server-side to avoid abusive Base RPC
   scans. Never scan from genesis.
 
+Coin tracking:
+
+- Stored in `base_coins`.
+- Ranked through `lib/ranking/coins.ts`; React components do not calculate coin
+  ranks.
+- Discovery writes are server-only and protected by `REFRESH_SECRET`.
+- `firstSeenAt` is preserved across reruns, so repeated discovery updates do not
+  erase the original early-detection timestamp.
+- Low-liquidity and high-risk coins can appear in discovery views, but risk
+  flags and confidence penalties reduce their ranking.
+- App rankings and coin rankings are intentionally separate. Token momentum
+  never changes app trend score.
+- Stale thresholds:
+  - app metrics: 2 hours
+  - coin metrics: 15 minutes
+  - new coin discovery: 10 minutes
+
 Token API:
 
 ```bash
 curl "$APP_URL/api/tokens?limit=8"
+curl "$APP_URL/api/coins?limit=40"
+curl "$APP_URL/api/coins/<token-address>"
 ```
 
 Verify token radar:
 
 ```bash
 npm run verify-token-radar
+npm run verify:coins
 ```
 
 Verify trend expansion:
@@ -653,8 +677,9 @@ VERIFY_APP_BASE_URL=https://your-preview-url npm run verify:supabase
 APP_URL=https://your-production-domain.com npm run verify:production
 ```
 
-The smoke test checks `/api/health`, homepage, `/api/apps`, one detail page,
-protected refresh/admin endpoints, and obvious secret leaks in public responses.
+The smoke test checks `/api/health`, homepage, `/api/apps`, `/api/coins`, one
+app detail page, one coin detail page when coin data exists,
+protected refresh/admin/discovery endpoints, and obvious secret leaks in public responses.
 `/api/health` is intentionally lightweight and does not perform DB or RPC checks.
 
 - Rotate any key that may have been pasted into client code, logs, screenshots, or a public repository.
@@ -671,7 +696,7 @@ Deployment safety checklist:
 - Refresh monitoring verified with `npm run verify:refresh-monitoring`.
 - Production env vars set in Vercel Production.
 - Preview env vars set intentionally, not copied blindly.
-- Cron configured in `vercel.json`.
+- Cron configured in `vercel.json` for app metric refresh and fast coin discovery.
 - `SUPABASE_SERVICE_ROLE_KEY` is not exposed through any `NEXT_PUBLIC_*` var.
 - `NEXT_PUBLIC_USE_MOCK_DATA=false`.
 - `npm run build` passes.
@@ -926,13 +951,19 @@ Authorization: Bearer <REFRESH_SECRET>
 
 Cron behavior:
 
-- `vercel.json` schedules `/api/refresh-metrics?secret=$REFRESH_SECRET` daily by default so Hobby deployments can ship.
-- On Vercel Pro, change the schedule to `*/30 * * * *` for a 30-minute refresh cadence.
+- `vercel.json` schedules `/api/refresh-metrics?secret=$REFRESH_SECRET` every
+  30 minutes.
+- `vercel.json` schedules `/api/discover-coins?secret=$REFRESH_SECRET` every
+  5 minutes for fast Base coin discovery.
+- Check your Vercel plan limits before relying on high-frequency cron in
+  production.
 - The endpoint accepts either `Authorization: Bearer <REFRESH_SECRET>` or `?secret=<REFRESH_SECRET>`.
 - The query fallback exists because cron providers cannot always send custom headers.
 - Missing or invalid secrets return `401`.
 - Refresh responses return only safe aggregate counts and never include `REFRESH_SECRET` or raw RPC errors.
 - Confirm cron execution in Vercel Logs by filtering for `/api/refresh-metrics`.
+- Confirm coin discovery in Vercel Logs by filtering for `/api/discover-coins`
+  or `[coin-discovery]`.
 
 Safe response shape:
 
