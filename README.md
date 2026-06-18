@@ -696,7 +696,9 @@ Deployment safety checklist:
 - Refresh monitoring verified with `npm run verify:refresh-monitoring`.
 - Production env vars set in Vercel Production.
 - Preview env vars set intentionally, not copied blindly.
-- Cron configured in `vercel.json` for app metric refresh and fast coin discovery.
+- Cron configured in `vercel.json`. Hobby deployments use daily Vercel Cron;
+  use Vercel Pro or an external scheduler for 30-minute app refresh and
+  5-minute coin discovery.
 - `SUPABASE_SERVICE_ROLE_KEY` is not exposed through any `NEXT_PUBLIC_*` var.
 - `NEXT_PUBLIC_USE_MOCK_DATA=false`.
 - `npm run build` passes.
@@ -951,12 +953,11 @@ Authorization: Bearer <REFRESH_SECRET>
 
 Cron behavior:
 
-- `vercel.json` schedules `/api/refresh-metrics?secret=$REFRESH_SECRET` every
-  30 minutes.
-- `vercel.json` schedules `/api/discover-coins?secret=$REFRESH_SECRET` every
-  5 minutes for fast Base coin discovery.
-- Check your Vercel plan limits before relying on high-frequency cron in
-  production.
+- `vercel.json` uses daily schedules because Vercel Hobby deployments reject
+  cron expressions that run more than once per day.
+- For the intended production cadence, use Vercel Pro or an external scheduler:
+  - `/api/refresh-metrics?secret=<REFRESH_SECRET>` every 30 minutes
+  - `/api/discover-coins?secret=<REFRESH_SECRET>` every 5 minutes
 - The endpoint accepts either `Authorization: Bearer <REFRESH_SECRET>` or `?secret=<REFRESH_SECRET>`.
 - The query fallback exists because cron providers cannot always send custom headers.
 - Missing or invalid secrets return `401`.
