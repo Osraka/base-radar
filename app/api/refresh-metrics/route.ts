@@ -523,21 +523,6 @@ async function handleRefresh(request: Request) {
   let lockAcquired = false;
 
   try {
-    const rateLimit = await rateLimitRefresh(request);
-
-    if (!rateLimit.allowed) {
-      return NextResponse.json(
-        { error: RATE_LIMITED_ERROR },
-        {
-          status: 429,
-          headers: {
-            ...securityHeaders(rateLimit),
-            ...rateLimitHeaders(rateLimit)
-          }
-        }
-      );
-    }
-
     const auth = verifyRefreshRequest(request);
 
     if (!auth.authorized) {
@@ -545,6 +530,18 @@ async function handleRefresh(request: Request) {
         { error: "Unauthorized." },
         {
           status: 401,
+          headers: securityHeaders()
+        }
+      );
+    }
+
+    const rateLimit = await rateLimitRefresh(request);
+
+    if (!rateLimit.allowed) {
+      return NextResponse.json(
+        { error: RATE_LIMITED_ERROR },
+        {
+          status: 429,
           headers: {
             ...securityHeaders(rateLimit),
             ...rateLimitHeaders(rateLimit)

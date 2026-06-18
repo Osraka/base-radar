@@ -40,7 +40,7 @@ const configs = {
   },
   refresh: {
     scope: "refresh",
-    limit: 10,
+    limit: 60,
     windowMs: 60 * 60_000,
     window: "1 h",
     missingEnvBehavior: "fail-closed"

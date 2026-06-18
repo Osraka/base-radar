@@ -26,6 +26,12 @@ function unauthorizedResponse(rateLimit?: Awaited<ReturnType<typeof rateLimitRef
 
 async function handleDiscover(request: Request) {
   const startedAt = new Date().toISOString();
+  const auth = verifyRefreshRequest(request);
+
+  if (!auth.authorized) {
+    return unauthorizedResponse();
+  }
+
   const rateLimit = await rateLimitRefresh(request);
 
   if (!rateLimit.allowed) {
@@ -39,12 +45,6 @@ async function handleDiscover(request: Request) {
         }
       }
     );
-  }
-
-  const auth = verifyRefreshRequest(request);
-
-  if (!auth.authorized) {
-    return unauthorizedResponse(rateLimit);
   }
 
   if (!acquireRefreshLock("coin-discovery", 9 * 60_000)) {
