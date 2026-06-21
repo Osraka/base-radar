@@ -177,11 +177,11 @@ await check("/api/coins returns migration-safe ranked data", async () => {
 });
 
 await check("/coins returns non-500", async () => {
-  const { response, text } = await fetchText("/coins");
+  const { response, text } = await fetchText("/coins?limit=300");
   assertNot500(response, "/coins");
   assert(response.status === 200, `Expected 200, got ${response.status}.`);
   assertNoSecret(text, "/coins");
-  return "coins page ok.";
+  return "coins page with limit=300 ok.";
 });
 
 await check("/coins/[address] returns non-500 when a coin exists", async () => {

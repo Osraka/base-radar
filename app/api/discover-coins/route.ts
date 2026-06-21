@@ -79,10 +79,10 @@ async function handleDiscover(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const configuredLimit =
-      Number(process.env.COIN_DISCOVERY_LIMIT_PER_BUCKET ?? 30) || 30;
+      Number(process.env.COIN_DISCOVERY_LIMIT_PER_BUCKET ?? 50) || 50;
     const limitPerBucket = Math.max(
       8,
-      Math.min(Number(searchParams.get("limit") ?? configuredLimit) || configuredLimit, 50)
+      Math.min(Number(searchParams.get("limit") ?? configuredLimit) || configuredLimit, 90)
     );
     const summary = await discoverBaseCoins({ limitPerBucket });
 

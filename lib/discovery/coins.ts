@@ -78,6 +78,10 @@ export async function discoverBaseCoins(options: { limitPerBucket?: number } = {
   const startedAt = new Date().toISOString();
   const warnings: string[] = [];
   const measuredAt = new Date().toISOString();
+  const responseLimit = Math.min(
+    300,
+    Math.max(50, (options.limitPerBucket ?? 50) * 3)
+  );
   let radar: Awaited<ReturnType<typeof fetchDexScreenerBaseTokenRadar>>;
 
   try {
@@ -172,7 +176,7 @@ export async function discoverBaseCoins(options: { limitPerBucket?: number } = {
       persistenceFailedCount: coins.length,
       persistenceAvailable: false,
       warnings,
-      coins: coins.slice(0, 50),
+      coins: coins.slice(0, responseLimit),
       source: "dexscreener" as const
     };
   }
@@ -216,7 +220,7 @@ export async function discoverBaseCoins(options: { limitPerBucket?: number } = {
       persistenceFailedCount: rows.length,
       persistenceAvailable: true,
       warnings,
-      coins: coins.slice(0, 50),
+      coins: coins.slice(0, responseLimit),
       source: "dexscreener" as const
     };
   }
@@ -239,7 +243,7 @@ export async function discoverBaseCoins(options: { limitPerBucket?: number } = {
     persistenceFailedCount: 0,
     persistenceAvailable: true,
     warnings,
-    coins: coins.slice(0, 50),
+    coins: coins.slice(0, responseLimit),
     source: "dexscreener" as const
   };
 }

@@ -6,6 +6,31 @@ import {
 } from "@/lib/supabase/server";
 
 const REQUIRED_COIN_TABLES = ["base_coins"] as const;
+const REQUIRED_BASE_COIN_COLUMNS = [
+  "id",
+  "token_address",
+  "name",
+  "symbol",
+  "pair_address",
+  "dex",
+  "price_usd",
+  "liquidity_usd",
+  "volume_24h",
+  "txns_24h",
+  "buys_24h",
+  "sells_24h",
+  "first_seen_at",
+  "last_seen_at",
+  "measured_at",
+  "source",
+  "confidence",
+  "coverage",
+  "risk_flags",
+  "labels",
+  "verification_status",
+  "score",
+  "score_breakdown"
+] as const;
 
 export interface CoinSchemaStatus {
   available: boolean;
@@ -39,7 +64,7 @@ export async function checkCoinSchemaStatus(): Promise<CoinSchemaStatus> {
   try {
     const { error } = await createSupabaseServerClient()
       .from("base_coins")
-      .select("id", { count: "exact", head: true })
+      .select(REQUIRED_BASE_COIN_COLUMNS.join(", "), { count: "exact", head: true })
       .limit(1);
 
     if (!error) {
@@ -60,7 +85,7 @@ export async function checkCoinSchemaStatus(): Promise<CoinSchemaStatus> {
     return {
       available: false,
       missingTables: [],
-      error: "Coin persistence schema could not be verified."
+      error: "Coin persistence schema is incomplete or could not be verified."
     };
   } catch {
     return {

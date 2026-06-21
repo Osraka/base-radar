@@ -38,10 +38,10 @@ MAX_INDEXER_APPS_PER_RUN=20
 DEFILLAMA_CACHE_TTL_SECONDS=1800
 DEXSCREENER_CACHE_TTL_SECONDS=300
 HONEYPOT_CACHE_TTL_SECONDS=900
-DEX_FACTORY_BLOCK_RANGE=21600
-MAX_DEX_FACTORY_POOLS=80
+DEX_FACTORY_BLOCK_RANGE=43200
+MAX_DEX_FACTORY_POOLS=160
 TOKEN_SNAPSHOT_LIMIT_PER_BUCKET=25
-COIN_DISCOVERY_LIMIT_PER_BUCKET=30
+COIN_DISCOVERY_LIMIT_PER_BUCKET=50
 BASE_TOKEN_WATCHLIST_JSON=[]
 BASE_TOKEN_WATCHLIST_WALLETS=
 SMART_WALLET_BLOCK_RANGE=7200
@@ -94,7 +94,7 @@ MAX_INDEXER_APPS_PER_RUN=20
 DEFILLAMA_CACHE_TTL_SECONDS=1800
 DEXSCREENER_CACHE_TTL_SECONDS=300
 HONEYPOT_CACHE_TTL_SECONDS=900
-COIN_DISCOVERY_LIMIT_PER_BUCKET=30
+COIN_DISCOVERY_LIMIT_PER_BUCKET=50
 BASE_TOKEN_WATCHLIST_JSON=[]
 BASE_TOKEN_WATCHLIST_WALLETS=
 SMART_WALLET_BLOCK_RANGE=7200
@@ -542,8 +542,8 @@ Token trends:
   address and event shape.
 - Factory discovery range controls:
   ```bash
-  DEX_FACTORY_BLOCK_RANGE=21600
-  MAX_DEX_FACTORY_POOLS=80
+  DEX_FACTORY_BLOCK_RANGE=43200
+  MAX_DEX_FACTORY_POOLS=160
   ```
   These values are intentionally capped so token discovery cannot accidentally
   scan from genesis or abuse the configured Base RPC provider.
@@ -635,16 +635,26 @@ Coin tracking:
   never changes app trend score.
 - Stale thresholds:
   - app metrics: 2 hours
-  - coin metrics: 15 minutes
-  - new coin discovery: 10 minutes
+  - coin metrics: 20 minutes
+  - new coin discovery: 15 minutes
 
 Token API:
 
 ```bash
 curl "$APP_URL/api/tokens?limit=8"
-curl "$APP_URL/api/coins?limit=40"
+curl "$APP_URL/api/coins?limit=300"
 curl "$APP_URL/api/coins/<token-address>"
 ```
+
+The `/coins` page supports server-rendered list expansion:
+
+- `/coins?limit=100`
+- `/coins?limit=300`
+- `/coins?sort=newest&limit=300`
+- `/coins?new=true&sort=newest&limit=300`
+
+The UI exposes Top 100, Top 300, Newest, and Load more controls without mixing
+coin rankings into app rankings.
 
 Verify token radar:
 

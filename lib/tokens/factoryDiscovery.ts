@@ -3,10 +3,10 @@ import "server-only";
 import { parseAbiItem, type Address } from "viem";
 import { getBasePublicClient, isBaseRpcConfigured, safeRpcErrorName } from "@/lib/baseClient";
 
-const DEFAULT_DEX_FACTORY_BLOCK_RANGE = 21_600;
-const MAX_DEX_FACTORY_BLOCK_RANGE = 43_200;
-const DEFAULT_MAX_DEX_FACTORY_POOLS = 80;
-const MAX_DEX_FACTORY_POOLS = 160;
+const DEFAULT_DEX_FACTORY_BLOCK_RANGE = 43_200;
+const MAX_DEX_FACTORY_BLOCK_RANGE = 86_400;
+const DEFAULT_MAX_DEX_FACTORY_POOLS = 160;
+const MAX_DEX_FACTORY_POOLS = 300;
 const FACTORY_DISCOVERY_TIMEOUT_MS = 9_000;
 
 const UNISWAP_V3_POOL_CREATED_EVENT = parseAbiItem(

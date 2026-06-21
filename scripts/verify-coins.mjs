@@ -93,8 +93,8 @@ loadEnvFile(".env");
 
 let sampleAddress = "";
 
-await check("/api/coins returns ranked coins", async () => {
-  const { response, body } = await fetchJson("/api/coins?limit=40");
+await check("/api/coins returns ranked coins up to 300", async () => {
+  const { response, body } = await fetchJson("/api/coins?limit=300");
 
   assert(response.status === 200, `Expected 200, got ${response.status}.`);
   assert(Array.isArray(body?.data), "data must be an array.");
@@ -125,6 +125,7 @@ await check("/api/coins returns ranked coins", async () => {
   assert(Array.isArray(body.data[0].riskFlags), "riskFlags must be an array.");
   sampleAddress = body.data[0].tokenAddress;
 
+  assert(body.data.length <= 300, "coin API returned more than requested limit.");
   return `coins=${body.data.length}, first=${body.data[0].symbol}.`;
 });
 

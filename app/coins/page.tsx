@@ -42,23 +42,69 @@ function riskTone(flags: string[]) {
   return "border-emerald-400/30 bg-emerald-400/10 text-emerald-100";
 }
 
+function singleParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function buildCoinsHref(input: {
+  sort?: CoinQueryOptions["sort"];
+  limit?: number;
+  newOnly?: boolean;
+  verifiedOnly?: boolean;
+  risk?: CoinQueryOptions["risk"];
+}) {
+  const params = new URLSearchParams();
+
+  if (input.sort && input.sort !== "score") {
+    params.set("sort", input.sort);
+  }
+
+  if (input.limit && input.limit !== 120) {
+    params.set("limit", String(input.limit));
+  }
+
+  if (input.newOnly) {
+    params.set("new", "true");
+  }
+
+  if (input.verifiedOnly) {
+    params.set("verified", "true");
+  }
+
+  if (input.risk && input.risk !== "all") {
+    params.set("risk", input.risk);
+  }
+
+  const query = params.toString();
+  return query ? `/coins?${query}` : "/coins";
+}
+
 export default async function CoinsPage({
   searchParams
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const params = await searchParams;
-  const sort = toSortMode(typeof params.sort === "string" ? params.sort : undefined);
-  const newOnly = params.new === "true";
-  const verifiedOnly = params.verified === "true";
-  const risk = params.risk === "lower" || params.risk === "high" ? params.risk : "all";
+  const sort = toSortMode(singleParam(params.sort));
+  const newOnly = singleParam(params.new) === "true";
+  const verifiedOnly = singleParam(params.verified) === "true";
+  const riskParam = singleParam(params.risk);
+  const risk = riskParam === "lower" || riskParam === "high" ? riskParam : "all";
+  const requestedLimit = Number(singleParam(params.limit) ?? 120);
+  const limit = Number.isFinite(requestedLimit)
+    ? Math.max(25, Math.min(Math.floor(requestedLimit), 300))
+    : 120;
   const snapshot = await getCoinRadarSnapshot({
-    limit: 120,
+    limit,
     sort,
     newOnly,
     verifiedOnly,
     risk
   });
+  const lowerRiskSelected = verifiedOnly && risk === "lower";
+  const factoryPoolCount = snapshot.coins.filter((coin) =>
+    coin.labels.some((label) => label === "Factory" || label === "New Pool")
+  ).length;
 
   return (
     <>
@@ -86,6 +132,11 @@ export default async function CoinsPage({
               staleAfterMinutes={snapshot.staleAfterMinutes}
               className="lg:justify-self-end"
             />
+            {factoryPoolCount > 0 ? (
+              <Badge className="w-fit border-primary/30 bg-primary/10 text-primary lg:justify-self-end">
+                {factoryPoolCount} factory-discovered pool
+              </Badge>
+            ) : null}
           </div>
         </section>
 
@@ -102,7 +153,13 @@ export default async function CoinsPage({
           ].map(([value, label]) => (
             <Link
               key={value}
-              href={`/coins?sort=${value}`}
+              href={buildCoinsHref({
+                sort: value as CoinQueryOptions["sort"],
+                limit,
+                newOnly,
+                verifiedOnly,
+                risk
+              })}
               className={cn(
                 buttonVariants({ variant: sort === value ? "default" : "secondary", size: "sm" })
               )}
@@ -111,16 +168,40 @@ export default async function CoinsPage({
             </Link>
           ))}
           <Link
-            href="/coins?new=true&sort=newest"
+            href={buildCoinsHref({
+              sort: "newest",
+              limit,
+              newOnly: !newOnly,
+              verifiedOnly,
+              risk
+            })}
             className={cn(buttonVariants({ variant: newOnly ? "default" : "secondary", size: "sm" }))}
           >
             New only
           </Link>
           <Link
-            href="/coins?verified=true&risk=lower"
-            className={cn(buttonVariants({ variant: verifiedOnly ? "default" : "secondary", size: "sm" }))}
+            href={buildCoinsHref({
+              sort,
+              limit,
+              newOnly,
+              verifiedOnly: !lowerRiskSelected,
+              risk: lowerRiskSelected ? "all" : "lower"
+            })}
+            className={cn(buttonVariants({ variant: lowerRiskSelected ? "default" : "secondary", size: "sm" }))}
           >
             Lower risk
+          </Link>
+          <Link
+            href={buildCoinsHref({ sort, limit: 100, newOnly, verifiedOnly, risk })}
+            className={cn(buttonVariants({ variant: limit === 100 ? "default" : "secondary", size: "sm" }))}
+          >
+            Top 100
+          </Link>
+          <Link
+            href={buildCoinsHref({ sort, limit: 300, newOnly, verifiedOnly, risk })}
+            className={cn(buttonVariants({ variant: limit === 300 ? "default" : "secondary", size: "sm" }))}
+          >
+            Top 300
           </Link>
         </section>
 
@@ -207,6 +288,23 @@ export default async function CoinsPage({
             )}
           </div>
         </section>
+
+        {snapshot.coins.length >= limit && limit < 300 ? (
+          <div className="mt-5 flex justify-center">
+            <Link
+              href={buildCoinsHref({
+                sort,
+                limit: Math.min(limit + 50, 300),
+                newOnly,
+                verifiedOnly,
+                risk
+              })}
+              className={cn(buttonVariants({ variant: "secondary" }))}
+            >
+              Load more
+            </Link>
+          </div>
+        ) : null}
 
         <section className="mt-6 rounded-lg border border-amber-400/20 bg-amber-400/10 p-4 text-sm leading-6 text-amber-50/85">
           High risk / newly detected token. Data may be incomplete. Base Radar is

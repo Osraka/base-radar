@@ -134,6 +134,8 @@ export function tokenTrendToCoin(token: BaseTokenTrend): BaseCoin | null {
   const measuredAt = token.detectedAt;
   const confidence = token.confidence;
   const labels = [
+    token.onchainFresh ? "New Pool" : null,
+    token.onchainPoolSource ? "Factory" : null,
     token.isNewSignal || token.onchainFresh ? "New" : null,
     token.isRisingSignal ? "Trending" : null,
     token.velocityScore && token.velocityScore > 60 ? "Hot" : null,
@@ -351,7 +353,7 @@ async function getCoinsFromSupabase(limit: number): Promise<{
 }
 
 async function getFallbackCoins(limit: number): Promise<BaseCoin[]> {
-  const radar = await getBaseTokenRadar(Math.max(8, Math.min(limit, 40)));
+  const radar = await getBaseTokenRadar(Math.max(12, Math.min(limit, 90)));
   const byAddress = new Map<string, BaseCoin>();
 
   for (const token of Object.values(radar.buckets).flat()) {
