@@ -22,6 +22,30 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
+## Agent Task Tracking (Beads)
+
+Base Radar uses [Beads](https://github.com/gastownhall/beads) to keep engineering
+tasks and dependencies across Codex sessions. The project-scoped Codex skill,
+hooks, and instructions are in `.agents/skills/beads/`, `.codex/`, and `AGENTS.md`.
+Beads is development task tracking; it does not run the production refresh jobs.
+
+Install the `bd` CLI once (macOS: `brew install beads`), then from this repository:
+
+```bash
+bd bootstrap                 # New clone: load task history from the Git remote
+bd prime                     # Load agent workflow context
+bd ready                     # See unblocked tasks
+bd create "Short task title" --description="Scope and acceptance criteria" --type=task --priority=2
+bd update <issue-id> --claim  # Mark work in progress
+bd close <issue-id> --reason="Verified and complete"
+```
+
+The local Dolt database is the task source of truth. To share task changes with
+other machines or agents, run `bd dolt push`; run `bd dolt pull` before taking
+new work in an existing clone. This stores task history in `refs/dolt/data` on
+the Git remote, separately from application code. A normal `git push` alone
+does not sync Beads tasks. Keep secrets out of issue titles and descriptions.
+
 ## Environment
 
 ```bash
