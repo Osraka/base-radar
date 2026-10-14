@@ -7,16 +7,15 @@ export interface RefreshAuthResult {
   reason?: "missing_config" | "missing_secret" | "invalid_secret";
 }
 
-function getProvidedRefreshSecret(request: Request) {
+function getProvidedRefreshSecrets(request: Request) {
   const url = new URL(request.url);
   const authorization = request.headers.get("authorization")?.trim() ?? "";
   const bearerMatch = authorization.match(/^Bearer\s+(.+)$/i);
 
-  return (
-    bearerMatch?.[1]?.trim() ||
-    url.searchParams.get("secret")?.trim() ||
-    ""
-  );
+  return {
+    bearer: bearerMatch?.[1]?.trim() ?? "",
+    query: url.searchParams.get("secret")?.trim() ?? ""
+  };
 }
 
 function digest(value: string) {
@@ -31,18 +30,28 @@ function constantTimeEqual(a: string, b: string) {
 }
 
 export function verifyRefreshRequest(request: Request): RefreshAuthResult {
-  const configuredSecret = process.env.REFRESH_SECRET?.trim() ?? "";
-  const providedSecret = getProvidedRefreshSecret(request);
+  const refreshSecret = process.env.REFRESH_SECRET?.trim() ?? "";
+  const cronSecret = process.env.CRON_SECRET?.trim() ?? "";
+  const provided = getProvidedRefreshSecrets(request);
 
-  if (!configuredSecret) {
+  if (!refreshSecret && !cronSecret) {
     return { authorized: false, reason: "missing_config" };
   }
 
-  if (!providedSecret) {
+  if (!provided.bearer && !provided.query) {
     return { authorized: false, reason: "missing_secret" };
   }
 
-  if (!constantTimeEqual(providedSecret, configuredSecret)) {
+  const bearerAuthorized = Boolean(
+    provided.bearer &&
+      ((refreshSecret && constantTimeEqual(provided.bearer, refreshSecret)) ||
+        (cronSecret && constantTimeEqual(provided.bearer, cronSecret)))
+  );
+  const queryAuthorized = Boolean(
+    provided.query && refreshSecret && constantTimeEqual(provided.query, refreshSecret)
+  );
+
+  if (!bearerAuthorized && !queryAuthorized) {
     return { authorized: false, reason: "invalid_secret" };
   }
 

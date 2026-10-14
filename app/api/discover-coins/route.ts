@@ -99,6 +99,7 @@ async function handleDiscover(request: Request) {
     });
 
     return NextResponse.json(summary, {
+      status: summary.success ? 200 : 503,
       headers: {
         ...securityHeaders(rateLimit),
         ...rateLimitHeaders(rateLimit),
@@ -114,8 +115,8 @@ async function handleDiscover(request: Request) {
 
     return NextResponse.json(
       {
-        ok: true,
-        success: true,
+        ok: false,
+        success: false,
         startedAt,
         finishedAt: new Date().toISOString(),
         measuredAt: startedAt,
@@ -131,7 +132,7 @@ async function handleDiscover(request: Request) {
         source: "dexscreener"
       },
       {
-        status: 200,
+        status: 503,
         headers: {
           ...securityHeaders(rateLimit),
           ...rateLimitHeaders(rateLimit)

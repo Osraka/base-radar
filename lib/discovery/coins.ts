@@ -15,8 +15,8 @@ interface ExistingCoinRow {
 }
 
 export interface CoinDiscoverySummary {
-  ok: true;
-  success: true;
+  ok: boolean;
+  success: boolean;
   startedAt: string;
   finishedAt: string;
   measuredAt: string;
@@ -89,8 +89,8 @@ export async function discoverBaseCoins(options: { limitPerBucket?: number } = {
   } catch {
     warnings.push("DexScreener discovery source is temporarily unavailable.");
     return {
-      ok: true,
-      success: true,
+      ok: false,
+      success: false,
       startedAt,
       finishedAt: new Date().toISOString(),
       measuredAt,
@@ -207,8 +207,8 @@ export async function discoverBaseCoins(options: { limitPerBucket?: number } = {
   if (error) {
     warnings.push("Coin persistence write failed; discovery results were returned without storing them.");
     return {
-      ok: true,
-      success: true,
+      ok: false,
+      success: false,
       startedAt,
       finishedAt: new Date().toISOString(),
       measuredAt,

@@ -19,6 +19,8 @@
     "verify:builder-codes": "node scripts/verify-builder-codes.mjs",
     "verify:builder-code-bridge": "node scripts/verify-builder-code-bridge.mjs",
     "verify:refresh-cron": "node scripts/verify-refresh-cron.mjs",
+    "verify:refresh-batch": "node scripts/verify-refresh-batch.mjs",
+    "verify:scheduler": "node scripts/verify-scheduler.mjs",
     "verify:refresh-monitoring": "node scripts/verify-refresh-monitoring.mjs",
     "verify:production": "node scripts/verify-production.mjs",
     "verify-adapters": "node scripts/verify-adapters.mjs",

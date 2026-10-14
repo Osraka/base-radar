@@ -58,6 +58,7 @@ UPSTASH_REDIS_REST_TOKEN=
 APP_URL=http://localhost:3000
 BASE_RPC_URL=
 REFRESH_SECRET=
+CRON_SECRET=
 MAX_INDEXER_APPS_PER_RUN=20
 DEFILLAMA_CACHE_TTL_SECONDS=1800
 DEXSCREENER_CACHE_TTL_SECONDS=300
@@ -73,7 +74,7 @@ NEYNAR_API_KEY=
 NEYNAR_CACHE_TTL_SECONDS=1800
 ```
 
-Only `NEXT_PUBLIC_*` values are safe for the browser. `SUPABASE_SERVICE_ROLE_KEY`, `UPSTASH_REDIS_REST_TOKEN`, `BASE_RPC_URL`, `REFRESH_SECRET`, `BASE_TOKEN_WATCHLIST_JSON`, `BASE_TOKEN_WATCHLIST_WALLETS`, and `NEYNAR_API_KEY` must stay server-side. Cache TTL, scanner-range, and discovery-limit values are not secrets, but they still belong in server/runtime env. `APP_URL` is not a secret, but it is used by local scripts. `SUPABASE_SERVICE_ROLE_KEY` is only for server-only admin tasks such as seeding, moderation, and future metrics jobs.
+Only `NEXT_PUBLIC_*` values are safe for the browser. `SUPABASE_SERVICE_ROLE_KEY`, `UPSTASH_REDIS_REST_TOKEN`, `BASE_RPC_URL`, `REFRESH_SECRET`, `CRON_SECRET`, `BASE_TOKEN_WATCHLIST_JSON`, `BASE_TOKEN_WATCHLIST_WALLETS`, and `NEYNAR_API_KEY` must stay server-side. Cache TTL, scanner-range, and discovery-limit values are not secrets, but they still belong in server/runtime env. `APP_URL` is not a secret, but it is used by local scripts. `SUPABASE_SERVICE_ROLE_KEY` is only for server-only admin tasks such as seeding, moderation, and future metrics jobs.
 
 ## Public Source Policy
 
@@ -969,6 +970,7 @@ Required server-side environment variables:
 APP_URL=https://your-production-domain.com
 BASE_RPC_URL=
 REFRESH_SECRET=
+CRON_SECRET=
 MAX_INDEXER_APPS_PER_RUN=20
 ```
 
@@ -989,13 +991,18 @@ Cron behavior:
 
 - `vercel.json` uses daily schedules because Vercel Hobby deployments reject
   cron expressions that run more than once per day.
-- For the intended production cadence, use Vercel Pro or an external scheduler:
-  - `/api/refresh-metrics?secret=<REFRESH_SECRET>` every 30 minutes
-  - `/api/discover-coins?secret=<REFRESH_SECRET>` every 5 minutes
-- The endpoint accepts either `Authorization: Bearer <REFRESH_SECRET>` or `?secret=<REFRESH_SECRET>`.
-- The query fallback exists because cron providers cannot always send custom headers.
+- Set `CRON_SECRET` in Vercel Production for the daily backup. Vercel sends it
+  automatically as a Bearer header; no secret belongs in `vercel.json`.
+- Use cron-job.org for faster runs. It supports a custom
+  `Authorization: Bearer <REFRESH_SECRET>` header. Query-string secret fallback
+  remains available, but avoid it when possible because URLs can enter logs.
+- For app metrics on cron-job.org, use `mode=fast&limit=2` every 10 minutes.
+  Each call selects a different stable batch of two contract-tracked apps and
+  one adapter-only app. The daily Vercel backup still runs the full pipeline.
 - Missing or invalid secrets return `401`.
-- Refresh responses return only safe aggregate counts and never include `REFRESH_SECRET` or raw RPC errors.
+- Failed refreshes return `503` rather than a misleading `200`; partial
+  successes retain their safe aggregate counters.
+- Refresh responses never include secrets or raw RPC errors.
 - Confirm cron execution in Vercel Logs by filtering for `/api/refresh-metrics`.
 - Confirm coin discovery in Vercel Logs by filtering for `/api/discover-coins`
   or `[coin-discovery]`.
@@ -1026,7 +1033,7 @@ Monitoring notes:
 - Keep `MAX_INDEXER_APPS_PER_RUN` conservative until RPC provider limits are understood.
 - Rotate `REFRESH_SECRET` if it is ever pasted into logs, screenshots, tickets, or public files.
 
-Official reference: Vercel Cron makes a scheduled HTTP request to the configured `path`: https://vercel.com/docs/cron-jobs
+Official references: [Vercel Cron authentication](https://vercel.com/docs/cron-jobs/manage-cron-jobs) and [cron-job.org custom headers and 30-second timeout](https://cron-job.org/en/faq/).
 
 ## Running Base Radar on Vercel Hobby with cron-job.org
 
@@ -1034,33 +1041,38 @@ Base Radar is designed to stay compatible with the Vercel Hobby/free plan.
 Vercel Cron remains a daily backup only. Fast refresh jobs should be triggered
 by an external scheduler such as cron-job.org.
 
-Use `GET` for all cron-job.org jobs. The endpoints also support
-`Authorization: Bearer <REFRESH_SECRET>`, but query-string auth is documented
-here because cron-job.org is easiest to configure with a URL.
+Use `GET` and configure a custom `Authorization` header with value
+`Bearer YOUR_REFRESH_SECRET` for each job. Do not put the secret in the URL.
+cron-job.org's default timeout is 30 seconds; check the execution history.
+The fast app mode limits work per request, but its actual duration still needs
+production measurement.
 
 Job 1 — Discover new Base coins:
 
 - Frequency: every 10 minutes
 - URL:
-  `https://base-radar-e9a3bug42-mitolojis-projects.vercel.app/api/discover-coins?secret=YOUR_REFRESH_SECRET`
+  `https://base-radar.vercel.app/api/discover-coins`
 - Expected success status: `200`
 - Expected response: `success: true`, plus discovered/refreshed/skipped/failure counters
 - Health fields to watch: `lastCoinDiscoveryAt`, `isCoinDiscoveryStale`, `warnings`
 
-Job 2 — Refresh tracked coin metrics:
+Job 2 — Refresh tracked coin metrics (currently the same operation as discovery):
 
 - Frequency: every 15 minutes
 - URL:
-  `https://base-radar-e9a3bug42-mitolojis-projects.vercel.app/api/refresh-coins?secret=YOUR_REFRESH_SECRET`
+  `https://base-radar.vercel.app/api/refresh-coins`
 - Expected success status: `200`
 - Expected response: same safe summary shape as coin discovery
+- `/api/refresh-coins` currently delegates to `/api/discover-coins`. Do not
+  schedule both jobs simultaneously; the 10-minute discovery job also refreshes
+  tracked coin snapshots. A distinct refresh implementation is future work.
 - Health fields to watch: `coinLastUpdated`, `lastCoinRefreshAt`, `isCoinDataStale`, `warnings`
 
-Job 3 — Refresh app metrics:
+Job 3 — Refresh app metrics in rotating short batches:
 
-- Frequency: every 60 minutes
+- Frequency: every 10 minutes
 - URL:
-  `https://base-radar-e9a3bug42-mitolojis-projects.vercel.app/api/refresh-metrics?secret=YOUR_REFRESH_SECRET`
+  `https://base-radar.vercel.app/api/refresh-metrics?mode=fast&limit=2`
 - Expected success status: `200`
 - Expected response: app metrics counters such as `processedApps`, `skippedApps`, and `errors`
 - Health fields to watch: `lastAppRefreshAt`, `isAppDataStale`, `latestRefreshStatus`, `warnings`
@@ -1068,13 +1080,18 @@ Job 3 — Refresh app metrics:
 cron-job.org settings:
 
 - Method: `GET`
-- Timeout: 30 to 60 seconds
-- Retry behavior: enable one retry if available, but avoid aggressive retries
-  because each endpoint is idempotent and protected by a lightweight concurrent-run lock.
-- Success condition: HTTP `200` for valid secrets; HTTP `401` means the secret is
-  missing or incorrect.
+- Timeout: use the default 30 seconds and inspect actual durations. If the
+  app job times out, reduce `limit` to 1 and investigate; do not mark it healthy.
+- Retry behavior: enable one retry at most. The current lock prevents concurrent
+  runs, but a completed retry can write another metric snapshot in the same slot.
+- Success condition: HTTP `200` with `success: true` or `ok: true`. `401` means
+  the secret is wrong, `429` means rate-limited, and `503` means refresh failed.
 - Confirm jobs are working by opening `/api/health` and checking that stale
   warnings clear and timestamps move forward.
+
+Run `npm run verify:scheduler` against the public site to fail loudly when
+any of the app, coin, or discovery timestamps are stale. A successful daily
+backup alone does not meet the intended fast-refresh cadence.
 
 If `base_coins` has not been migrated yet, coin endpoints still return live
 DexScreener fallback data. Coin discovery will return a warning and

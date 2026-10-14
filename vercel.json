@@ -1,11 +1,11 @@
 {
   "crons": [
     {
-      "path": "/api/refresh-metrics?secret=$REFRESH_SECRET",
+      "path": "/api/refresh-metrics",
       "schedule": "0 0 * * *"
     },
     {
-      "path": "/api/discover-coins?secret=$REFRESH_SECRET",
+      "path": "/api/discover-coins",
       "schedule": "5 0 * * *"
     }
   ]

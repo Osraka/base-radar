@@ -24,6 +24,7 @@ import {
   rateLimitRefresh
 } from "@/lib/rateLimit";
 import { acquireRefreshLock, releaseRefreshLock } from "@/lib/refreshLocks";
+import { selectRotatingBatch } from "@/lib/refreshBatch";
 import { calculateGrowth, calculateTrendScore } from "@/lib/scoring";
 import {
   isValidEthereumAddress,
@@ -62,7 +63,8 @@ const REFRESH_TRIGGER_TYPES = ["manual", "cron", "verification"] as const;
 type RefreshTriggerType = (typeof REFRESH_TRIGGER_TYPES)[number];
 
 interface RefreshSummary {
-  ok: true;
+  ok: boolean;
+  mode: "full" | "fast";
   processedApps: number;
   baseRpcMetricsInserted: number;
   protocolAdapterMetricsInserted: number;
@@ -198,7 +200,11 @@ async function completeRefreshRun(input: {
   summary: RefreshSummary;
   durationMs: number;
 }) {
-  const status = input.summary.errors > 0 ? "partial_failure" : "success";
+  const status = !input.summary.ok
+    ? "failed"
+    : input.summary.errors > 0
+      ? "partial_failure"
+      : "success";
 
   const { error } = await input.supabase
     .from("refresh_runs")
@@ -213,9 +219,10 @@ async function completeRefreshRun(input: {
       skipped_apps: input.summary.skippedApps,
       errors: input.summary.errors,
       duration_ms: Math.max(0, Math.round(input.durationMs)),
-      notes:
-        status === "success"
-          ? "Refresh completed successfully."
+      notes: status === "success"
+        ? "Refresh completed successfully."
+        : status === "failed"
+          ? "Refresh completed without inserting any metrics."
           : "Refresh completed with isolated app-level errors."
     })
     .eq("id", input.refreshRunId);
@@ -593,11 +600,13 @@ async function handleRefresh(request: Request) {
           measuredAt: new Date().toISOString(),
           warnings: ["Metrics refresh is not configured."]
         },
-        { status: 200, headers: securityHeaders(rateLimit) }
+        { status: 503, headers: securityHeaders(rateLimit) }
       );
     }
 
     const url = new URL(request.url);
+    const fastMode = url.searchParams.get("mode") === "fast";
+    const batchNow = Date.now();
     const configuredMaxApps = parsePositiveInteger(
       process.env.MAX_INDEXER_APPS_PER_RUN,
       DEFAULT_MAX_INDEXER_APPS_PER_RUN,
@@ -605,8 +614,8 @@ async function handleRefresh(request: Request) {
     );
     const maxApps = parsePositiveInteger(
       url.searchParams.get("limit"),
-      configuredMaxApps,
-      configuredMaxApps
+      fastMode ? 2 : configuredMaxApps,
+      fastMode ? 2 : configuredMaxApps
     );
     const blockRange = parsePositiveInteger(
       url.searchParams.get("blockRange"),
@@ -624,7 +633,7 @@ async function handleRefresh(request: Request) {
       .select("id, slug, name, builder_code, contract_addresses, created_at")
       .eq("status", "approved")
       .order("updated_at", { ascending: false })
-      .limit(Math.min(maxApps * 3, 100));
+      .limit(fastMode ? 100 : Math.min(maxApps * 3, 100));
 
     if (appsError) {
       throw new Error("Unable to fetch approved apps.");
@@ -635,24 +644,34 @@ async function handleRefresh(request: Request) {
         ...app,
         contract_addresses: (app.contract_addresses ?? []).filter(isValidEthereumAddress)
       }));
-    const approvedApps = sanitizedApprovedApps
+    const contractCandidates = sanitizedApprovedApps
       .filter((app) => app.contract_addresses.length > 0)
-      .filter((app) => app.contract_addresses.length <= MAX_CONTRACT_ADDRESSES_PER_APP)
-      .slice(0, maxApps);
+      .filter((app) => app.contract_addresses.length <= MAX_CONTRACT_ADDRESSES_PER_APP);
+    const approvedApps = fastMode
+      ? selectRotatingBatch(
+          [...contractCandidates].sort((a, b) => a.slug.localeCompare(b.slug)),
+          maxApps,
+          10 * 60_000,
+          batchNow
+        )
+      : contractCandidates.slice(0, maxApps);
     const baseRpcAppIds = new Set(approvedApps.map((app) => app.id));
     const protocolAdapterSlugSet = new Set(getProtocolAdapterSlugs());
     const adapterOnlyCandidates = sanitizedApprovedApps
       .filter((app) => !baseRpcAppIds.has(app.id))
-      .sort((appA, appB) => {
-        const appAHasAdapter = protocolAdapterSlugSet.has(appA.slug) ? 1 : 0;
-        const appBHasAdapter = protocolAdapterSlugSet.has(appB.slug) ? 1 : 0;
-
-        return appBHasAdapter - appAHasAdapter;
-      });
-    const adapterOnlyApps = adapterOnlyCandidates
-      .slice(0, maxApps);
+      .filter((app) => !fastMode || app.contract_addresses.length === 0)
+      .filter((app) => protocolAdapterSlugSet.has(app.slug));
+    const adapterOnlyApps = fastMode
+      ? selectRotatingBatch(
+          [...adapterOnlyCandidates].sort((a, b) => a.slug.localeCompare(b.slug)),
+          1,
+          10 * 60_000,
+          batchNow
+        )
+      : adapterOnlyCandidates.slice(0, maxApps);
     const latestMetrics = await getLatestMetricsByAppId(
-      sanitizedApprovedApps.map((app) => app.id)
+      (fastMode ? [...approvedApps, ...adapterOnlyApps] : sanitizedApprovedApps)
+        .map((app) => app.id)
     );
     const latestBlock = await getBasePublicClient().getBlockNumber();
     const fromBlock =
@@ -660,7 +679,10 @@ async function handleRefresh(request: Request) {
     const measuredAt = new Date().toISOString();
     let refreshed = 0;
     let failed = 0;
-    const skipped = (appRows?.length ?? 0) - approvedApps.length;
+    const skipped = Math.max(
+      0,
+      (appRows?.length ?? 0) - approvedApps.length - adapterOnlyApps.length
+    );
     let builderCodeAttributions = 0;
     let builderCodeMatches = 0;
     let builderCodeMetricRows = 0;
@@ -820,9 +842,11 @@ async function handleRefresh(request: Request) {
       }
     }
 
-    const builderApps = ((appRows ?? []) as ApprovedAppRow[])
-      .filter((app) => Boolean(app.builder_code))
-      .slice(0, Math.min(maxApps * 3, 100));
+    const builderApps = fastMode
+      ? []
+      : ((appRows ?? []) as ApprovedAppRow[])
+          .filter((app) => Boolean(app.builder_code))
+          .slice(0, Math.min(maxApps * 3, 100));
 
     for (const app of builderApps) {
       try {
@@ -870,29 +894,31 @@ async function handleRefresh(request: Request) {
       }
     }
 
-    try {
-      const socialTrendSummary = await refreshBaseSocialTrends();
-      socialTrendRows = socialTrendSummary.inserted;
-    } catch (error) {
-      console.warn("[social-radar] refresh failed gracefully", {
-        error: error instanceof Error ? error.name : "UnknownSocialRadarError"
-      });
-    }
+    if (!fastMode) {
+      try {
+        const socialTrendSummary = await refreshBaseSocialTrends();
+        socialTrendRows = socialTrendSummary.inserted;
+      } catch (error) {
+        console.warn("[social-radar] refresh failed gracefully", {
+          error: error instanceof Error ? error.name : "UnknownSocialRadarError"
+        });
+      }
 
-    try {
-      const tokenRadar = await fetchDexScreenerBaseTokenRadar(getTokenSnapshotLimit());
-      const tokenSnapshotSummary = await persistTokenRadarSnapshots({
-        supabase,
-        buckets: tokenRadar.buckets,
-        refreshRunId,
-        detectedAt: measuredAt
-      });
-      tokenSnapshotRows = tokenSnapshotSummary.inserted;
-    } catch (error) {
-      tokenSnapshotErrors += 1;
-      console.warn("[token-radar] snapshot refresh failed gracefully", {
-        error: error instanceof Error ? error.name : "UnknownTokenSnapshotError"
-      });
+      try {
+        const tokenRadar = await fetchDexScreenerBaseTokenRadar(getTokenSnapshotLimit());
+        const tokenSnapshotSummary = await persistTokenRadarSnapshots({
+          supabase,
+          buckets: tokenRadar.buckets,
+          refreshRunId,
+          detectedAt: measuredAt
+        });
+        tokenSnapshotRows = tokenSnapshotSummary.inserted;
+      } catch (error) {
+        tokenSnapshotErrors += 1;
+        console.warn("[token-radar] snapshot refresh failed gracefully", {
+          error: error instanceof Error ? error.name : "UnknownTokenSnapshotError"
+        });
+      }
     }
 
     console.info("[base-indexer] refresh complete", {
@@ -904,13 +930,15 @@ async function handleRefresh(request: Request) {
         failed + builderCodeBridgeErrors + protocolAdapterErrors + tokenSnapshotErrors,
       newlyDiscoveredCount: tokenSnapshotRows,
       measuredAt,
+      mode: fastMode ? "fast" : "full",
       fromBlock: fromBlock.toString(),
       toBlock: latestBlock.toString()
     });
 
     const summary: RefreshSummary = {
-      ok: true,
-      processedApps: approvedApps.length,
+      ok: refreshed + protocolAdapterMetricRows + builderCodeMetricRows > 0,
+      mode: fastMode ? "fast" : "full",
+      processedApps: approvedApps.length + adapterOnlyApps.length,
       baseRpcMetricsInserted: refreshed,
       protocolAdapterMetricsInserted: protocolAdapterMetricRows,
       builderCodeMetricsInserted: builderCodeMetricRows,
@@ -947,7 +975,10 @@ async function handleRefresh(request: Request) {
       durationMs: Date.now() - startedAt
     });
 
-    return NextResponse.json(summary, { headers: securityHeaders(rateLimit) });
+    return NextResponse.json(summary, {
+      status: summary.ok ? 200 : 503,
+      headers: securityHeaders(rateLimit)
+    });
   } catch (error) {
     if (supabase && refreshRunId) {
       await failRefreshRun({
@@ -976,7 +1007,7 @@ async function handleRefresh(request: Request) {
         measuredAt: new Date().toISOString(),
         warnings: ["Unable to refresh metrics. Check server logs for safe error categories."]
       },
-      { status: 200, headers: securityHeaders() }
+      { status: 503, headers: securityHeaders() }
     );
   } finally {
     if (lockAcquired) {
