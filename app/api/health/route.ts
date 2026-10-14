@@ -6,6 +6,7 @@ import {
   USE_MOCK_DATA
 } from "@/lib/constants";
 import { checkCoinSchemaStatus } from "@/lib/coins/schema";
+import { getLatestSuccessfulCoinJobAt } from "@/lib/coins/jobRuns";
 import {
   createSupabaseAdminClient,
   isSupabaseAdminConfigured
@@ -22,6 +23,7 @@ interface HealthCounts {
   appLastUpdated: string | null;
   coinLastUpdated: string | null;
   lastCoinDiscoveryAt: string | null;
+  lastCoinRefreshAt: string | null;
   latestRefreshStatus: string | null;
   warnings: string[];
 }
@@ -93,6 +95,7 @@ async function getHealthCounts(): Promise<HealthCounts> {
       appLastUpdated: null,
       coinLastUpdated: null,
       lastCoinDiscoveryAt: null,
+      lastCoinRefreshAt: null,
       latestRefreshStatus: null,
       warnings: ["Supabase is not configured."]
     };
@@ -120,15 +123,17 @@ async function getHealthCounts(): Promise<HealthCounts> {
     coinSchemaStatus.available
       ? supabase
           .from("base_coins")
-          .select("measured_at, last_seen_at")
+          .select("measured_at")
           .order("measured_at", { ascending: false })
           .limit(1)
           .maybeSingle()
       : Promise.resolve({ data: null, error: null }),
-    getLatestRefreshStatus()
+    getLatestRefreshStatus(),
+    getLatestSuccessfulCoinJobAt("discovery"),
+    getLatestSuccessfulCoinJobAt("refresh")
   ]);
 
-  const [appCountResult, latestMetricResult, coinCountResult, latestCoinResult, statusResult] = checks;
+  const [appCountResult, latestMetricResult, coinCountResult, latestCoinResult, statusResult, discoveryRunResult, refreshRunResult] = checks;
 
   if (!coinSchemaStatus.available) {
     warnings.push(
@@ -168,7 +173,8 @@ async function getHealthCounts(): Promise<HealthCounts> {
       ? firstTimestamp(latestMetricResult.value.data, "measured_at")
       : null,
     coinLastUpdated: firstTimestamp(coinData, "measured_at"),
-    lastCoinDiscoveryAt: firstTimestamp(coinData, "last_seen_at"),
+    lastCoinDiscoveryAt: discoveryRunResult.status === "fulfilled" ? discoveryRunResult.value : null,
+    lastCoinRefreshAt: refreshRunResult.status === "fulfilled" ? refreshRunResult.value : null,
     latestRefreshStatus: statusResult.status === "fulfilled"
       ? statusResult.value
       : null,
@@ -183,6 +189,7 @@ export async function GET() {
     appLastUpdated: null,
     coinLastUpdated: null,
     lastCoinDiscoveryAt: null,
+    lastCoinRefreshAt: null,
     latestRefreshStatus: null,
     warnings: ["Health checks failed gracefully."]
   }));
@@ -239,7 +246,7 @@ export async function GET() {
       globalLastUpdated,
       coinLastUpdated: counts.coinLastUpdated,
       lastCoinDiscoveryAt: counts.lastCoinDiscoveryAt,
-      lastCoinRefreshAt: counts.coinLastUpdated,
+      lastCoinRefreshAt: counts.lastCoinRefreshAt,
       lastAppRefreshAt: counts.appLastUpdated,
       latestRefreshStatus: counts.latestRefreshStatus,
       isAppDataStale,

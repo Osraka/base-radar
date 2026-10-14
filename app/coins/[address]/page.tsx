@@ -125,7 +125,9 @@ export default async function CoinDetailPage({
                 {Object.entries(coin.scoreBreakdown).map(([label, value]) => (
                   <div key={label}>
                     <div className="mb-1 flex items-center justify-between text-xs">
-                      <span className="capitalize text-muted-foreground">{label}</span>
+                      <span className="capitalize text-muted-foreground">
+                        {label === "age" ? "Pool age" : label}
+                      </span>
                       <span className="metric-tabular text-white">{value.toFixed(1)}</span>
                     </div>
                     <div className="h-2 overflow-hidden rounded-full bg-white/10">
@@ -162,7 +164,13 @@ export default async function CoinDetailPage({
                   <span className="text-right text-white">{coin.coverage}</span>
                 </div>
                 <div className="flex justify-between gap-3">
-                  <span className="text-muted-foreground">First seen</span>
+                  <span className="text-muted-foreground">Pool created</span>
+                  <span className="text-right text-white">
+                    {coin.pairCreatedAt ? relativeTime(coin.pairCreatedAt) : "Not reported by source"}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <span className="text-muted-foreground">First seen by radar</span>
                   <span className="text-right text-white">{relativeTime(coin.firstSeenAt)}</span>
                 </div>
               </div>

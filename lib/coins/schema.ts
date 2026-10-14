@@ -38,6 +38,23 @@ export interface CoinSchemaStatus {
   error?: string;
 }
 
+export async function hasCoinProvenanceColumns() {
+  if (!isSupabaseServerConfigured()) {
+    return false;
+  }
+
+  try {
+    const { error } = await createSupabaseServerClient()
+      .from("base_coins")
+      .select("pair_created_at, honeypot_flagged", { head: true })
+      .limit(1);
+
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
 function isMissingRelationError(error: unknown) {
   if (!error || typeof error !== "object") {
     return false;

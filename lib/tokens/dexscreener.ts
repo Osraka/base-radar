@@ -995,3 +995,33 @@ export async function fetchDexScreenerBaseTokenRadar(limitPerBucket = 8) {
     }
   };
 }
+
+export async function fetchDexScreenerBaseTokenUpdates(addresses: string[]) {
+  const uniqueAddresses = [...new Set(addresses.map(normalizeAddress).filter(
+    (address): address is string => Boolean(address)
+  ))].slice(0, 300);
+  const groups = await mapWithConcurrency(
+    chunkItems(uniqueAddresses, TOKEN_BATCH_SIZE),
+    4,
+    async (chunk) => {
+      const pairs = await fetchJson<DexScreenerPair[]>(
+        `/tokens/v1/${BASE_CHAIN_ID}/${chunk.join(",")}`
+      );
+
+      return {
+        pairs: (pairs ?? []).filter((pair) => pair.chainId === BASE_CHAIN_ID),
+        failed: pairs === null,
+        addressCount: chunk.length
+      };
+    }
+  );
+  const pairs = dedupeBestPairs(groups.flatMap((group) => group.pairs));
+
+  return {
+    tokens: pairs.map((pair) => toTokenTrend(pair, "volume")).filter(
+      (token): token is BaseTokenTrend => Boolean(token)
+    ),
+    failedBatches: groups.filter((group) => group.failed).length,
+    failedAddresses: groups.reduce((count, group) => count + (group.failed ? group.addressCount : 0), 0)
+  };
+}

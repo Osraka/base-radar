@@ -23,7 +23,9 @@ export type CoinRiskFlag =
   | "unknown_source"
   | "unverified_metadata"
   | "too_new"
-  | "possible_honeypot";
+  | "possible_honeypot"
+  | "trade_simulation_failed"
+  | "safety_check_unverified";
 
 export interface BaseCoin {
   id: string;
@@ -54,6 +56,8 @@ export interface BaseCoin {
   priceChange24h: number | null;
   holders: number | null;
   firstSeenAt: string;
+  pairCreatedAt: string | null;
+  honeypotFlagged: boolean | null;
   lastSeenAt: string;
   measuredAt: string;
   source: CoinSource;

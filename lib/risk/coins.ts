@@ -10,17 +10,13 @@ export function detectCoinRiskFlags(coin: Pick<
   | "sells24h"
   | "source"
   | "confidence"
-  | "firstSeenAt"
   | "riskFlags"
 >) {
-  const flags = new Set<CoinRiskFlag>(coin.riskFlags ?? []);
+  // Stored age flags from older releases used discovery time as launch time.
+  const flags = new Set<CoinRiskFlag>((coin.riskFlags ?? []).filter((flag) => flag !== "too_new"));
   const liquidityUsd = coin.liquidityUsd ?? 0;
   const buys = coin.buys24h ?? 0;
   const sells = coin.sells24h ?? 0;
-  const firstSeenAt = new Date(coin.firstSeenAt).getTime();
-  const ageHours = Number.isFinite(firstSeenAt)
-    ? (Date.now() - firstSeenAt) / 3_600_000
-    : null;
 
   if (liquidityUsd <= 0) {
     flags.add("liquidity_missing");
@@ -55,10 +51,6 @@ export function detectCoinRiskFlags(coin: Pick<
     flags.add("unverified_metadata");
   }
 
-  if (ageHours !== null && ageHours < 24) {
-    flags.add("too_new");
-  }
-
   return [...flags];
 }
 
@@ -66,6 +58,10 @@ export function coinRiskPenalty(flags: CoinRiskFlag[]) {
   return flags.reduce((penalty, flag) => {
     if (flag === "possible_honeypot") {
       return penalty + 40;
+    }
+
+    if (flag === "trade_simulation_failed") {
+      return penalty + 30;
     }
 
     if (flag === "liquidity_missing") {

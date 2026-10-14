@@ -52,6 +52,8 @@ interface BaseCoinRow {
   price_change_24h: number | string | null;
   holders: number | string | null;
   first_seen_at: string;
+  pair_created_at?: string | null;
+  honeypot_flagged?: boolean | null;
   last_seen_at: string;
   measured_at: string;
   source: string | null;
@@ -130,13 +132,23 @@ export function tokenTrendToCoin(token: BaseTokenTrend): BaseCoin | null {
     return null;
   }
 
-  const firstSeenAt = token.firstSeenAt ?? token.pairCreatedAt ?? token.detectedAt;
+  const firstSeenAt = token.firstSeenAt ?? token.detectedAt;
   const measuredAt = token.detectedAt;
   const confidence = token.confidence;
+  const pairCreatedAt = token.pairCreatedAt ?? null;
+  const pairAgeMs = pairCreatedAt ? Date.now() - new Date(pairCreatedAt).getTime() : NaN;
+  const isNewPool = Boolean(token.onchainFresh) ||
+    (Number.isFinite(pairAgeMs) && pairAgeMs >= 0 && pairAgeMs < 86_400_000);
+  const honeypotFlagged = token.honeypotIsHoneypot === true ||
+    token.honeypotRisk?.toLowerCase() === "honeypot"
+    ? true
+    : token.honeypotIsHoneypot === false
+      ? false
+      : null;
   const labels = [
-    token.onchainFresh ? "New Pool" : null,
+    isNewPool ? "New Pool" : null,
     token.onchainPoolSource ? "Factory" : null,
-    token.isNewSignal || token.onchainFresh ? "New" : null,
+    token.isNewSignal ? "New to Radar" : null,
     token.isRisingSignal ? "Trending" : null,
     token.velocityScore && token.velocityScore > 60 ? "Hot" : null,
     token.riskLevel === "high" ? "High Risk" : null,
@@ -171,16 +183,19 @@ export function tokenTrendToCoin(token: BaseTokenTrend): BaseCoin | null {
     priceChange24h: token.priceChange24h,
     holders: null,
     firstSeenAt,
+    pairCreatedAt,
+    honeypotFlagged,
     lastSeenAt: token.lastSeenAt ?? measuredAt,
     measuredAt,
     source: "dexscreener",
     confidence,
     coverage: confidence === "high" ? "high" : confidence === "medium" ? "medium" : "limited",
-    riskFlags: token.riskReasons?.some((reason) => reason.toLowerCase().includes("honeypot"))
-      ? ["possible_honeypot"]
-      : [],
+    riskFlags: [
+      ...(honeypotFlagged === true ? ["possible_honeypot" as const] : []),
+      ...(token.simulationSuccess === false ? ["trade_simulation_failed" as const] : [])
+    ],
     labels,
-    verificationStatus: token.safetyStatus === "passed" ? "verified" : "pending",
+    verificationStatus: "pending",
     score: 0,
     scoreBreakdown: {}
   };
@@ -195,6 +210,22 @@ export function tokenTrendToCoin(token: BaseTokenTrend): BaseCoin | null {
 }
 
 function rowToCoin(row: BaseCoinRow): BaseCoin {
+  const pairCreatedAt = row.pair_created_at ?? null;
+  const pairAgeMs = pairCreatedAt ? Date.now() - new Date(pairCreatedAt).getTime() : NaN;
+  const newPool = Number.isFinite(pairAgeMs) && pairAgeMs >= 0 && pairAgeMs < 86_400_000;
+  const oldFlags = row.risk_flags ?? [];
+  const riskFlags = oldFlags.filter((flag) =>
+    flag !== "too_new" &&
+    flag !== "possible_honeypot" &&
+    !(row.honeypot_flagged != null && flag === "safety_check_unverified")
+  ) as BaseCoin["riskFlags"];
+
+  if (row.honeypot_flagged === true) {
+    riskFlags.push("possible_honeypot");
+  } else if (row.honeypot_flagged == null && oldFlags.includes("possible_honeypot")) {
+    riskFlags.push("safety_check_unverified");
+  }
+
   const draft: BaseCoin = {
     id: row.id,
     chainId: "base",
@@ -224,13 +255,20 @@ function rowToCoin(row: BaseCoinRow): BaseCoin {
     priceChange24h: toNullableNumber(row.price_change_24h),
     holders: toNullableNumber(row.holders),
     firstSeenAt: row.first_seen_at,
+    pairCreatedAt,
+    honeypotFlagged: row.honeypot_flagged ?? null,
     lastSeenAt: row.last_seen_at,
     measuredAt: row.measured_at,
     source: toSource(row.source),
     confidence: toConfidence(row.confidence),
     coverage: toCoverage(row.coverage),
-    riskFlags: (row.risk_flags ?? []) as BaseCoin["riskFlags"],
-    labels: row.labels ?? [],
+    riskFlags,
+    labels: [
+      ...(newPool ? ["New Pool"] : []),
+      ...(row.labels ?? []).filter((label) =>
+        label !== "New" && label !== "New Pool" && label !== "New to Radar"
+      )
+    ],
     verificationStatus: toVerificationStatus(row.verification_status),
     score: toNumber(row.score),
     scoreBreakdown: row.score_breakdown ?? {}
@@ -274,7 +312,7 @@ function sortCoins(coins: BaseCoin[], sort: CoinQueryOptions["sort"] = "score") 
   const sorters = {
     score: (a: BaseCoin, b: BaseCoin) => b.score - a.score,
     newest: (a: BaseCoin, b: BaseCoin) =>
-      new Date(b.firstSeenAt).getTime() - new Date(a.firstSeenAt).getTime(),
+      new Date(b.pairCreatedAt ?? 0).getTime() - new Date(a.pairCreatedAt ?? 0).getTime(),
     liquidity: (a: BaseCoin, b: BaseCoin) => (b.liquidityUsd ?? 0) - (a.liquidityUsd ?? 0),
     volume1h: (a: BaseCoin, b: BaseCoin) => (b.volume1h ?? 0) - (a.volume1h ?? 0),
     volume24h: (a: BaseCoin, b: BaseCoin) => (b.volume24h ?? 0) - (a.volume24h ?? 0),
@@ -295,12 +333,16 @@ function applyCoinFilters(coins: BaseCoin[], options: CoinQueryOptions) {
       return false;
     }
 
-    if (options.newOnly && now - new Date(coin.firstSeenAt).getTime() > 86_400_000) {
+    const pairCreatedAt = coin.pairCreatedAt ? new Date(coin.pairCreatedAt).getTime() : NaN;
+
+    if (options.newOnly && (!Number.isFinite(pairCreatedAt) ||
+      pairCreatedAt > now || now - pairCreatedAt > 86_400_000)) {
       return false;
     }
 
     if (options.risk === "lower" && coin.riskFlags.some((flag) =>
       flag === "possible_honeypot" ||
+      flag === "trade_simulation_failed" ||
       flag === "liquidity_missing" ||
       flag === "suspicious_buy_sell_imbalance"
     )) {

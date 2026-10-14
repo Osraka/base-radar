@@ -1,8 +1,9 @@
 import "server-only";
 
 import type { BaseCoin } from "@/lib/coins/types";
-import { checkCoinSchemaStatus } from "@/lib/coins/schema";
+import { checkCoinSchemaStatus, hasCoinProvenanceColumns } from "@/lib/coins/schema";
 import { tokenTrendToCoin } from "@/lib/ranking/coins";
+import { calculateCoinTrendScore } from "@/lib/scoring/coins";
 import {
   createSupabaseAdminClient,
   isSupabaseAdminConfigured
@@ -12,6 +13,11 @@ import { fetchDexScreenerBaseTokenRadar } from "@/lib/tokens/dexscreener";
 interface ExistingCoinRow {
   token_address: string;
   first_seen_at: string;
+  pair_address: string | null;
+  pair_created_at?: string | null;
+  honeypot_flagged?: boolean | null;
+  risk_flags: string[] | null;
+  verification_status: "verified" | "pending" | "needs_review" | "rejected";
 }
 
 export interface CoinDiscoverySummary {
@@ -32,7 +38,10 @@ export interface CoinDiscoverySummary {
   source: "dexscreener";
 }
 
-function toDbRow(coin: NonNullable<ReturnType<typeof tokenTrendToCoin>>) {
+export function toDbRow(
+  coin: NonNullable<ReturnType<typeof tokenTrendToCoin>>,
+  provenanceAvailable = false
+) {
   return {
     chain_id: coin.chainId,
     token_address: coin.tokenAddress,
@@ -61,6 +70,10 @@ function toDbRow(coin: NonNullable<ReturnType<typeof tokenTrendToCoin>>) {
     price_change_24h: coin.priceChange24h,
     holders: coin.holders,
     first_seen_at: coin.firstSeenAt,
+    ...(provenanceAvailable ? {
+      pair_created_at: coin.pairCreatedAt,
+      honeypot_flagged: coin.honeypotFlagged
+    } : {}),
     last_seen_at: coin.lastSeenAt,
     measured_at: coin.measuredAt,
     source: coin.source,
@@ -182,23 +195,63 @@ export async function discoverBaseCoins(options: { limitPerBucket?: number } = {
   }
 
   const supabase = createSupabaseAdminClient();
+  const provenanceAvailable = await hasCoinProvenanceColumns();
+  if (!provenanceAvailable) {
+    warnings.push("Coin pool provenance migration is pending; pool age and safety evidence will remain limited.");
+  }
   const addresses = coins.map((coin) => coin.tokenAddress);
-  const { data: existingRows } = await supabase
+  const { data: existingRows, error: existingLookupError } = await supabase
     .from("base_coins")
-    .select("token_address, first_seen_at")
+    .select("*")
     .in("token_address", addresses);
-  const firstSeenByAddress = new Map(
-    ((existingRows ?? []) as ExistingCoinRow[]).map((row) => [
-      row.token_address.toLowerCase(),
-      row.first_seen_at
-    ])
+
+  if (existingLookupError) {
+    warnings.push("Existing coin records could not be checked; persistence was skipped to preserve first-seen timestamps.");
+    return {
+      ok: false,
+      success: false,
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      measuredAt,
+      discoveredCount: 0,
+      refreshedCount: 0,
+      updatedCount: 0,
+      skippedCount,
+      failedCount: 1,
+      persistenceFailedCount: coins.length,
+      persistenceAvailable: true,
+      warnings,
+      coins: coins.slice(0, responseLimit),
+      source: "dexscreener" as const
+    };
+  }
+  const existingByAddress = new Map(
+    ((existingRows ?? []) as ExistingCoinRow[]).map((row) => [row.token_address.toLowerCase(), row])
   );
   const rows = coins.map((coin) => {
-    const firstSeenAt = firstSeenByAddress.get(coin.tokenAddress) ?? coin.firstSeenAt;
-    return toDbRow({
+    const existing = existingByAddress.get(coin.tokenAddress);
+    const honeypotFlagged = coin.honeypotFlagged ?? existing?.honeypot_flagged ?? null;
+    const priorRiskFlags = existing?.risk_flags ?? [];
+    const riskFlags = [
+      ...coin.riskFlags.filter((flag) => flag !== "possible_honeypot"),
+      ...(honeypotFlagged === true ? ["possible_honeypot" as const] : []),
+      ...(priorRiskFlags.includes("trade_simulation_failed") && coin.honeypotFlagged === null
+        ? ["trade_simulation_failed" as const] : []),
+      ...(priorRiskFlags.includes("possible_honeypot") && honeypotFlagged === null
+        ? ["safety_check_unverified" as const] : []),
+      ...(priorRiskFlags.includes("safety_check_unverified") && honeypotFlagged === null
+        ? ["safety_check_unverified" as const] : [])
+    ];
+    const updated = {
       ...coin,
-      firstSeenAt
-    });
+      firstSeenAt: existing?.first_seen_at ?? coin.firstSeenAt,
+      pairCreatedAt: coin.pairCreatedAt ??
+        (coin.pairAddress === existing?.pair_address ? existing?.pair_created_at ?? null : null),
+      honeypotFlagged,
+      verificationStatus: existing?.verification_status ?? "pending" as const,
+      riskFlags: [...new Set(riskFlags)]
+    };
+    return toDbRow({ ...updated, ...calculateCoinTrendScore(updated) }, provenanceAvailable);
   });
   const { error } = await supabase
     .from("base_coins")
@@ -226,7 +279,7 @@ export async function discoverBaseCoins(options: { limitPerBucket?: number } = {
   }
 
   const discoveredCount = rows.filter(
-    (row) => !firstSeenByAddress.has(String(row.token_address).toLowerCase())
+    (row) => !existingByAddress.has(String(row.token_address).toLowerCase())
   ).length;
 
   return {

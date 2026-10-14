@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { verifyRefreshRequest } from "@/lib/cronAuth";
+import { finishCoinJobRun, startCoinJobRun } from "@/lib/coins/jobRuns";
 import { discoverBaseCoins } from "@/lib/discovery/coins";
 import {
   RATE_LIMITED_ERROR,
@@ -76,6 +77,8 @@ async function handleDiscover(request: Request) {
     );
   }
 
+  const runId = await startCoinJobRun("discovery");
+
   try {
     const { searchParams } = new URL(request.url);
     const configuredLimit =
@@ -85,6 +88,7 @@ async function handleDiscover(request: Request) {
       Math.min(Number(searchParams.get("limit") ?? configuredLimit) || configuredLimit, 90)
     );
     const summary = await discoverBaseCoins({ limitPerBucket });
+    await finishCoinJobRun(runId, summary);
 
     console.info("[coin-discovery] complete", {
       startedAt,
@@ -107,6 +111,14 @@ async function handleDiscover(request: Request) {
       }
     });
   } catch (error) {
+    await finishCoinJobRun(runId, {
+      success: false,
+      discoveredCount: 0,
+      refreshedCount: 0,
+      skippedCount: 0,
+      failedCount: 1,
+      warnings: ["Coin discovery failed gracefully; retry later."]
+    });
     console.warn("[coin-discovery] failed gracefully", {
       startedAt,
       finishedAt: new Date().toISOString(),

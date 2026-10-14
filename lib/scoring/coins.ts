@@ -29,10 +29,10 @@ function confidencePenalty(confidence: BaseCoin["confidence"]) {
   return 16;
 }
 
-function ageBoost(firstSeenAt: string) {
-  const timestamp = new Date(firstSeenAt).getTime();
+function ageBoost(pairCreatedAt: string | null) {
+  const timestamp = pairCreatedAt ? new Date(pairCreatedAt).getTime() : NaN;
 
-  if (!Number.isFinite(timestamp)) {
+  if (!Number.isFinite(timestamp) || timestamp > Date.now()) {
     return 0;
   }
 
@@ -78,7 +78,7 @@ export function calculateCoinTrendScore(coin: BaseCoin) {
     txns: normalize(coin.txns24h, 2_000),
     buySell: buySellScore(coin.buys24h, coin.sells24h),
     priceMomentum: clamp(Math.max(0, coin.priceChange1h ?? coin.priceChange6h ?? 0)),
-    age: ageBoost(coin.firstSeenAt)
+    age: ageBoost(coin.pairCreatedAt)
   };
   const rawScore =
     breakdown.liquidity * 0.18 +

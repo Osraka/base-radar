@@ -1056,17 +1056,33 @@ Job 1 — Discover new Base coins:
 - Expected response: `success: true`, plus discovered/refreshed/skipped/failure counters
 - Health fields to watch: `lastCoinDiscoveryAt`, `isCoinDiscoveryStale`, `warnings`
 
-Job 2 — Refresh tracked coin metrics (currently the same operation as discovery):
+Job 2 — Refresh tracked coin metrics:
 
 - Frequency: every 15 minutes
 - URL:
   `https://base-radar.vercel.app/api/refresh-coins`
 - Expected success status: `200`
-- Expected response: same safe summary shape as coin discovery
-- `/api/refresh-coins` currently delegates to `/api/discover-coins`. Do not
-  schedule both jobs simultaneously; the 10-minute discovery job also refreshes
-  tracked coin snapshots. A distinct refresh implementation is future work.
+- Expected response: `refreshedCount`, `skippedCount`, `failedCount`, and warnings
+- This job only refreshes persisted token addresses in DexScreener batches;
+  the discovery job is separate. When coin persistence is unavailable, it
+  falls back to a small discovery run rather than failing.
+- Apply `20261014151740_coin_pool_provenance_and_safety.sql` before enabling
+  this job in production. The application remains compatible before migration,
+  but pool age and explicit safety evidence cannot be persisted yet.
+- Apply `20261014152307_coin_job_run_tracking.sql` to persist independent
+  discovery and refresh results. `coin_job_runs` is service-role-only; the
+  public health endpoint shows only each job's last successful finish time.
 - Health fields to watch: `coinLastUpdated`, `lastCoinRefreshAt`, `isCoinDataStale`, `warnings`
+
+Coin age and safety provenance:
+
+- `first_seen_at` means first observed by Base Radar, not token launch time.
+- `pair_created_at` is the DexScreener-reported pool creation time. "New pools"
+  filtering and the age score use only this timestamp; missing dates receive
+  no recency boost.
+- A Honeypot.is timeout or unavailable check is not a positive honeypot result.
+  Only an explicit positive result sets `honeypot_flagged`. Legacy ambiguous
+  flags are shown as safety checks needing verification, not a confirmed label.
 
 Job 3 — Refresh app metrics in rotating short batches:
 

@@ -123,6 +123,13 @@ await check("/api/coins returns ranked coins up to 300", async () => {
   assert(typeof body.data[0].score === "number", "score is missing.");
   assert(typeof body.data[0].calculatedAt === "string", "calculatedAt is missing.");
   assert(Array.isArray(body.data[0].riskFlags), "riskFlags must be an array.");
+  assert(body.data.every((coin) => !coin.riskFlags.includes("too_new")),
+    "Discovery time was incorrectly used as token age.");
+  assert(body.data.every((coin) =>
+    !coin.riskFlags.includes("possible_honeypot") || coin.honeypotFlagged === true
+  ), "A honeypot warning was shown without explicit evidence.");
+  assert(body.data.every((coin) => coin.pairCreatedAt === null ||
+    typeof coin.pairCreatedAt === "string"), "Pool creation provenance is missing.");
   sampleAddress = body.data[0].tokenAddress;
 
   assert(body.data.length <= 300, "coin API returned more than requested limit.");
@@ -140,6 +147,19 @@ await check("/api/coins/[address] returns sample coin", async () => {
   return `coin=${body.data.symbol}.`;
 });
 
+await check("new-pool filter never treats radar discovery as launch", async () => {
+  const { response, body } = await fetchJson("/api/coins?limit=300&newOnly=true&sort=newest");
+  assert(response.status === 200, `Expected 200, got ${response.status}.`);
+  assert(Array.isArray(body?.data), "New-pool response must contain an array.");
+  const now = Date.now();
+  for (const coin of body.data) {
+    const createdAt = coin.pairCreatedAt ? new Date(coin.pairCreatedAt).getTime() : NaN;
+    assert(Number.isFinite(createdAt) && createdAt <= now && now - createdAt <= 86_400_000,
+      "New-pool result lacks a recent, dated pool.");
+  }
+  return `recent pools=${body.data.length}.`;
+});
+
 await check("/api/discover-coins rejects missing secret", async () => {
   const { response, text } = await fetchJson("/api/discover-coins");
   assert(response.status === 401, `Expected 401, got ${response.status}.`);
@@ -148,6 +168,36 @@ await check("/api/discover-coins rejects missing secret", async () => {
     assert(!text.includes(secret), "Secret leaked.");
   }
   return "missing secret rejected.";
+});
+
+await check("/api/refresh-coins rejects missing secret", async () => {
+  const { response, text } = await fetchJson("/api/refresh-coins");
+  assert(response.status === 401, `Expected 401, got ${response.status}.`);
+  const secret = process.env.REFRESH_SECRET?.trim();
+  if (secret) {
+    assert(!text.includes(secret), "Secret leaked.");
+  }
+  return "missing secret rejected.";
+});
+
+await check("tracked-coin refresh is separate from discovery", async () => {
+  const secret = process.env.REFRESH_SECRET?.trim();
+
+  if (!secret) {
+    return "skipped; REFRESH_SECRET not configured.";
+  }
+
+  const { response, body } = await fetchJson("/api/refresh-coins", {
+    headers: { authorization: `Bearer ${secret}` }
+  });
+  assert(response.status !== 401, "Valid refresh secret was rejected.");
+  assert(response.status !== 500, "Coin refresh crashed.");
+  assert(typeof body?.refreshedCount === "number", "refreshedCount missing.");
+  assert(typeof body?.failedCount === "number", "failedCount missing.");
+  if (body?.persistenceAvailable) {
+    assert(body.discoveredCount === 0, "Tracked-coin refresh performed discovery.");
+  }
+  return `status=${response.status}, refreshed=${body.refreshedCount}, failed=${body.failedCount}.`;
 });
 
 await check("coin discovery accepts valid secret when configured", async () => {

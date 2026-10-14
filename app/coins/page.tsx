@@ -177,7 +177,7 @@ export default async function CoinsPage({
             })}
             className={cn(buttonVariants({ variant: newOnly ? "default" : "secondary", size: "sm" }))}
           >
-            New only
+            New pools
           </Link>
           <Link
             href={buildCoinsHref({
@@ -215,7 +215,7 @@ export default async function CoinsPage({
           <div className="hidden grid-cols-[54px_1.35fr_0.75fr_0.8fr_0.8fr_0.75fr_0.75fr_0.8fr_0.85fr] gap-3 border-b border-white/10 px-4 py-3 text-xs uppercase tracking-[0.12em] text-muted-foreground lg:grid">
             <span>Rank</span>
             <span>Token</span>
-            <span>Age</span>
+            <span>Pool age</span>
             <span>Liquidity</span>
             <span>Vol 24h</span>
             <span>TXs</span>
@@ -226,8 +226,9 @@ export default async function CoinsPage({
           <div className="divide-y divide-white/10">
             {snapshot.coins.length === 0 ? (
               <div className="p-8 text-sm text-muted-foreground">
-                No Base coins found yet. Discovery may be waiting for DexScreener
-                data or Supabase migration setup.
+                {newOnly
+                  ? "No pools with a verified creation time in the last 24 hours. Try all coins."
+                  : "No Base coins found yet. Discovery may be waiting for DexScreener data or Supabase migration setup."}
               </div>
             ) : (
               snapshot.coins.map((coin) => (
@@ -253,7 +254,7 @@ export default async function CoinsPage({
                     </span>
                   </span>
                   <span className="text-xs text-muted-foreground">
-                    {relativeTime(coin.firstSeenAt)}
+                    {coin.pairCreatedAt ? relativeTime(coin.pairCreatedAt) : "Pool age unknown"}
                   </span>
                   <span className="metric-tabular text-sm text-white">
                     {coin.liquidityUsd ? formatCurrency(coin.liquidityUsd) : "Liquidity unavailable"}
