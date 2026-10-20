@@ -1,5 +1,9 @@
 import "server-only";
 
+import {
+  reconcileCoinRefreshCoverage,
+  selectTrackedRefreshCandidates
+} from "@/lib/coins/refreshAccounting";
 import { checkCoinSchemaStatus, hasCoinProvenanceColumns } from "@/lib/coins/schema";
 import { discoverBaseCoins, toDbRow } from "@/lib/discovery/coins";
 import { tokenTrendToCoin } from "@/lib/ranking/coins";
@@ -67,15 +71,15 @@ export async function refreshTrackedCoins() {
   const tracked = (data ?? []) as TrackedCoinRow[];
   const addresses = tracked.map((coin) => coin.token_address.toLowerCase());
   const existingByAddress = new Map(tracked.map((coin) => [coin.token_address.toLowerCase(), coin]));
-  const { tokens, failedBatches, failedAddresses } = await fetchDexScreenerBaseTokenUpdates(addresses);
+  const { tokens, failedBatches, failedAddresses, skippedReasons: sourceReasons } =
+    await fetchDexScreenerBaseTokenUpdates(addresses);
   const measuredAt = new Date().toISOString();
   const provenanceAvailable = await hasCoinProvenanceColumns();
-  const rows = tokens.flatMap((token) => {
+  const rows = selectTrackedRefreshCandidates(existingByAddress, tokens).map(({ update: token, existing }) => {
     const fresh = tokenTrendToCoin(token);
-    const existing = fresh ? existingByAddress.get(fresh.tokenAddress) : null;
 
-    if (!fresh || !existing) {
-      return [];
+    if (!fresh) {
+      return null;
     }
 
     const oldFlags = existing.risk_flags ?? [];
@@ -109,8 +113,14 @@ export async function refreshTrackedCoins() {
     };
     const scored = calculateCoinTrendScore(coin);
 
-    return [toDbRow({ ...coin, ...scored }, provenanceAvailable)];
-  });
+    return toDbRow({ ...coin, ...scored }, provenanceAvailable);
+  }).filter((row): row is NonNullable<typeof row> => row !== null);
+  const { skippedCount, skipReasons } = reconcileCoinRefreshCoverage(
+    tracked.length,
+    rows.length,
+    failedAddresses,
+    sourceReasons
+  );
   const warnings: string[] = [];
 
   if (failedBatches > 0) {
@@ -119,6 +129,10 @@ export async function refreshTrackedCoins() {
 
   if (!provenanceAvailable) {
     warnings.push("Coin pool provenance migration is pending; pool age and safety evidence are limited.");
+  }
+
+  if (skippedCount > 0) {
+    warnings.push(`${skippedCount} tracked coin(s) had no usable DexScreener update; previous values were retained.`);
   }
 
   let persistenceFailedCount = 0;
@@ -146,7 +160,8 @@ export async function refreshTrackedCoins() {
     discoveredCount: 0,
     refreshedCount,
     updatedCount: refreshedCount,
-    skippedCount: Math.max(0, tracked.length - rows.length - failedAddresses),
+    skippedCount,
+    skipReasons,
     failedCount,
     persistenceFailedCount,
     persistenceAvailable: true,

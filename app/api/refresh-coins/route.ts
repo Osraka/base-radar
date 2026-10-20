@@ -55,6 +55,7 @@ async function handleRefresh(request: Request) {
       finishedAt: summary.finishedAt,
       refreshedCount: summary.refreshedCount,
       skippedCount: summary.skippedCount,
+      skipReasons: "skipReasons" in summary ? summary.skipReasons : undefined,
       failedCount: summary.failedCount,
       newlyDiscoveredCount: summary.discoveredCount,
       measuredAt: summary.measuredAt,

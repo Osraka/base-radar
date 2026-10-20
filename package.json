@@ -20,6 +20,7 @@
     "verify:builder-code-bridge": "node scripts/verify-builder-code-bridge.mjs",
     "verify:refresh-cron": "node scripts/verify-refresh-cron.mjs",
     "verify:refresh-batch": "node scripts/verify-refresh-batch.mjs",
+    "verify:coin-refresh-accounting": "node scripts/verify-coin-refresh-accounting.mjs",
     "verify:scheduler": "node scripts/verify-scheduler.mjs",
     "verify:refresh-monitoring": "node scripts/verify-refresh-monitoring.mjs",
     "verify:production": "node scripts/verify-production.mjs",

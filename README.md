@@ -1072,6 +1072,16 @@ Job 2 — Refresh tracked coin metrics:
 - Apply `20261014152307_coin_job_run_tracking.sql` to persist independent
   discovery and refresh results. `coin_job_runs` is service-role-only; the
   public health endpoint shows only each job's last successful finish time.
+- Apply `20261020214503_coin_refresh_skip_reasons.sql` to persist aggregate
+  `skip_reasons` in each refresh run. The API response and server log also show
+  these counts without listing wallet or token addresses. `no_active_pair`
+  means a separate DexScreener token lookup returned no Base pair;
+  `not_returned_in_batch` means the batch omitted the token and its individual
+  lookup has not yet been attempted; `quote_side_only` and `invalid_pair_data`
+  identify pairs that cannot safely produce token metrics. A small rotating
+  set of missing tokens is checked individually each run to stay within API
+  and function budgets. Source-request failures count as failures, not skips.
+  Missing tokens keep their previous metrics; a skip is not zero activity.
 - Health fields to watch: `coinLastUpdated`, `lastCoinRefreshAt`, `isCoinDataStale`, `warnings`
 
 Coin age and safety provenance:

@@ -1,5 +1,11 @@
 import "server-only";
 
+import {
+  classifyMissingTrackedCoin,
+  emptyCoinSkipReasons,
+  isUsableTrackedPair
+} from "@/lib/coins/refreshAccounting";
+import { selectRotatingBatch } from "@/lib/refreshBatch";
 import { safeParseUrl, sanitizeText } from "@/lib/security";
 import { checkTokenWithHoneypot, type HoneypotSafetyResult } from "@/lib/tokens/honeypot";
 import {
@@ -25,6 +31,7 @@ const BASE_CHAIN_ID = "base";
 const MAX_TOKEN_ADDRESSES = 500;
 const TOKEN_PAIR_FETCH_CONCURRENCY = 8;
 const TOKEN_BATCH_SIZE = 30;
+const MAX_INDIVIDUAL_REFRESH_RETRIES = 8;
 const BASE_DISCOVERY_QUERIES = [
   "base",
   "base token",
@@ -131,6 +138,9 @@ interface DexScreenerPair {
     address?: string;
     name?: string;
     symbol?: string;
+  };
+  quoteToken?: {
+    address?: string;
   };
   priceUsd?: string;
   txns?: {
@@ -1000,6 +1010,7 @@ export async function fetchDexScreenerBaseTokenUpdates(addresses: string[]) {
   const uniqueAddresses = [...new Set(addresses.map(normalizeAddress).filter(
     (address): address is string => Boolean(address)
   ))].slice(0, 300);
+  const requestedAddresses = new Set(uniqueAddresses);
   const groups = await mapWithConcurrency(
     chunkItems(uniqueAddresses, TOKEN_BATCH_SIZE),
     4,
@@ -1009,19 +1020,78 @@ export async function fetchDexScreenerBaseTokenUpdates(addresses: string[]) {
       );
 
       return {
+        addresses: chunk,
         pairs: (pairs ?? []).filter((pair) => pair.chainId === BASE_CHAIN_ID),
-        failed: pairs === null,
-        addressCount: chunk.length
+        failed: pairs === null
       };
     }
   );
-  const pairs = dedupeBestPairs(groups.flatMap((group) => group.pairs));
+  const failedAddresses = new Set(
+    groups.filter((group) => group.failed).flatMap((group) => group.addresses)
+  );
+  const batchPairs = groups.flatMap((group) => group.pairs);
+  const toTrackedTokens = (pairs: DexScreenerPair[]) => dedupeBestPairs(
+    pairs.filter(isUsableTrackedPair)
+  ).map((pair) => toTokenTrend(pair, "volume")).filter(
+    (token): token is BaseTokenTrend & { contractAddress: string } =>
+      Boolean(token?.contractAddress && requestedAddresses.has(token.contractAddress))
+  );
+  const batchTokenAddresses = new Set(
+    toTrackedTokens(batchPairs).map((token) => token.contractAddress)
+  );
+  const retryCandidates = uniqueAddresses.filter(
+    (address) => !failedAddresses.has(address) && !batchTokenAddresses.has(address)
+  );
+  const retryAddresses = selectRotatingBatch(
+    retryCandidates,
+    MAX_INDIVIDUAL_REFRESH_RETRIES,
+    15 * 60_000
+  );
+  const retries = await mapWithConcurrency(retryAddresses, 4, async (address) => {
+    const pairs = await fetchJson<DexScreenerPair[]>(
+      `/token-pairs/v1/${BASE_CHAIN_ID}/${address}`
+    );
+
+    return {
+      address,
+      pairs: (pairs ?? []).filter((pair) => pair.chainId === BASE_CHAIN_ID),
+      failed: pairs === null
+    };
+  });
+  const individuallyChecked = new Set(
+    retries.filter((retry) => !retry.failed).map((retry) => retry.address)
+  );
+
+  for (const retry of retries) {
+    if (retry.failed) {
+      failedAddresses.add(retry.address);
+    }
+  }
+
+  const allPairs = [...batchPairs, ...retries.flatMap((retry) => retry.pairs)];
+  const tokens = toTrackedTokens(allPairs).filter(
+    (token) => !failedAddresses.has(token.contractAddress)
+  );
+  const refreshedAddresses = new Set(tokens.map((token) => token.contractAddress));
+  const skippedReasons = emptyCoinSkipReasons();
+
+  for (const address of uniqueAddresses) {
+    if (failedAddresses.has(address) || refreshedAddresses.has(address)) {
+      continue;
+    }
+
+    const reason = classifyMissingTrackedCoin(
+      address,
+      allPairs,
+      individuallyChecked.has(address)
+    );
+    skippedReasons[reason] += 1;
+  }
 
   return {
-    tokens: pairs.map((pair) => toTokenTrend(pair, "volume")).filter(
-      (token): token is BaseTokenTrend => Boolean(token)
-    ),
+    tokens,
     failedBatches: groups.filter((group) => group.failed).length,
-    failedAddresses: groups.reduce((count, group) => count + (group.failed ? group.addressCount : 0), 0)
+    failedAddresses: failedAddresses.size,
+    skippedReasons
   };
 }
