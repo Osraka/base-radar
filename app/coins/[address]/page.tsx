@@ -89,26 +89,34 @@ export default async function CoinDetailPage({
                   {coin.name} · Rank #{coin.rank} · {coin.dex ?? "DEX pair"}
                 </p>
               </div>
-              <Badge className={cn("gap-1", riskTone(coin.riskFlags))}>
+              <Badge className={cn("gap-1", coin.isStale
+                ? "border-amber-400/30 bg-amber-400/10 text-amber-100"
+                : riskTone(coin.riskFlags))}>
                 {coin.riskFlags.length ? (
                   <AlertTriangle className="h-3 w-3" />
                 ) : (
                   <ShieldCheck className="h-3 w-3" />
                 )}
-                {coin.riskFlags.length ? "Risk flags" : "Lower risk"}
+                {coin.isStale ? "Safety recheck needed" : coin.riskFlags.length ? "Risk flags" : "Lower risk"}
               </Badge>
             </div>
 
+            {coin.isStale ? (
+              <div className="mt-5 rounded-lg border border-amber-400/30 bg-amber-400/10 p-4 text-sm leading-6 text-amber-50">
+                Market snapshot is stale. Values below are the last recorded observations from {relativeTime(coin.measuredAt)}, not current liquidity, volume, price, or safety evidence.
+              </div>
+            ) : null}
+
             <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               {[
-                ["Price", coin.priceUsd ? `$${coin.priceUsd.toPrecision(6)}` : "Price unavailable"],
-                ["Liquidity", coin.liquidityUsd ? formatCurrency(coin.liquidityUsd) : "Liquidity unavailable"],
-                ["24h volume", coin.volume24h ? formatCurrency(coin.volume24h) : "No verified volume"],
-                ["24h TXs", formatCompact(coin.txns24h ?? 0)],
-                ["Buys / sells", `${formatCompact(coin.buys24h ?? 0)} / ${formatCompact(coin.sells24h ?? 0)}`],
-                ["Price change", formatPercent(coin.priceChange1h ?? coin.priceChange24h)],
-                ["Market cap", coin.marketCap ? formatCurrency(coin.marketCap) : "Market cap unavailable"],
-                ["Trend score", coin.score.toFixed(1)]
+                [coin.isStale ? "Last price" : "Price", coin.priceUsd ? `$${coin.priceUsd.toPrecision(6)}` : "Price unavailable"],
+                [coin.isStale ? "Last liquidity" : "Liquidity", coin.liquidityUsd ? formatCurrency(coin.liquidityUsd) : "Liquidity unavailable"],
+                [coin.isStale ? "Last 24h volume" : "24h volume", coin.volume24h ? formatCurrency(coin.volume24h) : "No verified volume"],
+                [coin.isStale ? "Last 24h TXs" : "24h TXs", coin.txns24h === null ? "Not reported" : formatCompact(coin.txns24h)],
+                [coin.isStale ? "Last buys / sells" : "Buys / sells", coin.buys24h === null || coin.sells24h === null ? "Not reported" : `${formatCompact(coin.buys24h)} / ${formatCompact(coin.sells24h)}`],
+                [coin.isStale ? "Last price change" : "Price change", formatPercent(coin.priceChange1h ?? coin.priceChange24h)],
+                [coin.isStale ? "Last market cap" : "Market cap", coin.marketCap ? formatCurrency(coin.marketCap) : "Market cap unavailable"],
+                ["Trend score", coin.isStale ? "Awaiting refresh" : coin.score.toFixed(1)]
               ].map(([label, value]) => (
                 <div key={label} className="rounded-lg border border-white/10 bg-[#07111f] p-4">
                   <p className="text-xs text-muted-foreground">{label}</p>
@@ -139,6 +147,9 @@ export default async function CoinDetailPage({
                   </div>
                 ))}
               </div>
+              <p className="mt-4 text-xs text-muted-foreground">
+                Freshness reduces the score after 20 minutes without a new market snapshot; after two hours, past activity cannot contribute to a current trend score.
+              </p>
             </div>
 
             <div className="mt-6 rounded-lg border border-amber-400/20 bg-amber-400/10 p-4 text-sm leading-6 text-amber-50/85">
@@ -219,7 +230,7 @@ export default async function CoinDetailPage({
                   >
                     <span className="min-w-0 truncate text-white">{item.symbol}</span>
                     <span className="metric-tabular text-muted-foreground">
-                      {item.score.toFixed(1)}
+                      {item.isStale ? "Stale" : item.score.toFixed(1)}
                     </span>
                   </Link>
                 ))}

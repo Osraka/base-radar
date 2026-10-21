@@ -243,6 +243,11 @@ export default async function CoinsPage({
                       <span className="truncate text-sm font-semibold text-white">
                         {coin.symbol}
                       </span>
+                      {coin.isStale ? (
+                        <Badge className="shrink-0 border-amber-400/30 bg-amber-400/10 text-[10px] text-amber-100">
+                          Stale
+                        </Badge>
+                      ) : null}
                       {coin.labels.slice(0, 2).map((label) => (
                         <Badge key={label} className="shrink-0 text-[10px]">
                           {label}
@@ -250,37 +255,47 @@ export default async function CoinsPage({
                       ))}
                     </span>
                     <span className="mt-1 block truncate text-xs text-muted-foreground">
-                      {coin.name} · {coin.dex ?? "DEX pair"}
+                      {coin.name} · {coin.dex ?? "DEX pair"} · Measured {relativeTime(coin.measuredAt)}
                     </span>
                   </span>
                   <span className="text-xs text-muted-foreground">
                     {coin.pairCreatedAt ? relativeTime(coin.pairCreatedAt) : "Pool age unknown"}
                   </span>
                   <span className="metric-tabular text-sm text-white">
-                    {coin.liquidityUsd ? formatCurrency(coin.liquidityUsd) : "Liquidity unavailable"}
+                    {coin.isStale
+                      ? "Snapshot stale"
+                      : coin.liquidityUsd
+                        ? formatCurrency(coin.liquidityUsd)
+                        : "Liquidity unavailable"}
                   </span>
                   <span className="metric-tabular text-sm text-white">
-                    {coin.volume24h ? formatCurrency(coin.volume24h) : "No verified volume"}
+                    {coin.isStale
+                      ? "Snapshot stale"
+                      : coin.volume24h
+                        ? formatCurrency(coin.volume24h)
+                        : "No verified volume"}
                   </span>
                   <span className="metric-tabular text-sm text-white">
-                    {formatCompact(coin.txns24h ?? 0)}
+                    {coin.isStale ? "Snapshot stale" : coin.txns24h === null ? "Not reported" : formatCompact(coin.txns24h)}
                   </span>
                   <span className="metric-tabular text-sm text-white">
-                    {formatPercent(coin.priceChange1h ?? coin.priceChange24h)}
+                    {coin.isStale ? "Snapshot stale" : formatPercent(coin.priceChange1h ?? coin.priceChange24h)}
                   </span>
                   <span>
-                    <Badge className={cn("gap-1", riskTone(coin.riskFlags))}>
+                    <Badge className={cn("gap-1", coin.isStale
+                      ? "border-amber-400/30 bg-amber-400/10 text-amber-100"
+                      : riskTone(coin.riskFlags))}>
                       {coin.riskFlags.length ? (
                         <AlertTriangle className="h-3 w-3" />
                       ) : (
                         <ShieldCheck className="h-3 w-3" />
                       )}
-                      {coin.riskFlags.length ? "Watch" : "Lower"}
+                      {coin.isStale ? "Recheck" : coin.riskFlags.length ? "Watch" : "Lower"}
                     </Badge>
                   </span>
                   <span className="flex items-center justify-between gap-2">
                     <span className="metric-tabular text-sm font-semibold text-white">
-                      {coin.score.toFixed(1)}
+                      {coin.isStale ? "Awaiting refresh" : coin.score.toFixed(1)}
                     </span>
                     <ArrowUpRight className="h-4 w-4 text-muted-foreground" />
                   </span>

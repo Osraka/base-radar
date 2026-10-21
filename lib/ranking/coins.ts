@@ -13,6 +13,7 @@ import type {
   RankedCoin
 } from "@/lib/coins/types";
 import { checkCoinSchemaStatus } from "@/lib/coins/schema";
+import { compareCoinMetricFreshness, isCoinMetricStale } from "@/lib/coins/freshness";
 import { calculateCoinTrendScore } from "@/lib/scoring/coins";
 import { sanitizeText } from "@/lib/security";
 import {
@@ -145,14 +146,15 @@ export function tokenTrendToCoin(token: BaseTokenTrend): BaseCoin | null {
     : token.honeypotIsHoneypot === false
       ? false
       : null;
+  const stale = isCoinMetricStale(measuredAt);
   const labels = [
-    isNewPool ? "New Pool" : null,
+    !stale && isNewPool ? "New Pool" : null,
     token.onchainPoolSource ? "Factory" : null,
-    token.isNewSignal ? "New to Radar" : null,
-    token.isRisingSignal ? "Trending" : null,
-    token.velocityScore && token.velocityScore > 60 ? "Hot" : null,
+    !stale && token.isNewSignal ? "New to Radar" : null,
+    !stale && token.isRisingSignal ? "Trending" : null,
+    !stale && token.velocityScore && token.velocityScore > 60 ? "Hot" : null,
     token.riskLevel === "high" ? "High Risk" : null,
-    token.safetyStatus === "passed" ? "Watchlist Candidate" : null
+    !stale && token.safetyStatus === "passed" ? "Watchlist Candidate" : null
   ].filter((label): label is string => Boolean(label));
   const draft: BaseCoin = {
     id: token.id,
@@ -210,6 +212,7 @@ export function tokenTrendToCoin(token: BaseTokenTrend): BaseCoin | null {
 }
 
 function rowToCoin(row: BaseCoinRow): BaseCoin {
+  const stale = isCoinMetricStale(row.measured_at);
   const pairCreatedAt = row.pair_created_at ?? null;
   const pairAgeMs = pairCreatedAt ? Date.now() - new Date(pairCreatedAt).getTime() : NaN;
   const newPool = Number.isFinite(pairAgeMs) && pairAgeMs >= 0 && pairAgeMs < 86_400_000;
@@ -264,9 +267,10 @@ function rowToCoin(row: BaseCoinRow): BaseCoin {
     coverage: toCoverage(row.coverage),
     riskFlags,
     labels: [
-      ...(newPool ? ["New Pool"] : []),
+      ...(!stale && newPool ? ["New Pool"] : []),
       ...(row.labels ?? []).filter((label) =>
-        label !== "New" && label !== "New Pool" && label !== "New to Radar"
+        label !== "New" && label !== "New Pool" && label !== "New to Radar" &&
+        (!stale || !["Hot", "Trending", "Watchlist Candidate"].includes(label))
       )
     ],
     verificationStatus: toVerificationStatus(row.verification_status),
@@ -281,20 +285,6 @@ function rowToCoin(row: BaseCoinRow): BaseCoin {
     riskFlags: scored.riskFlags,
     scoreBreakdown: scored.scoreBreakdown
   };
-}
-
-function isCoinMetricStale(measuredAt: string | null | undefined) {
-  if (!measuredAt) {
-    return true;
-  }
-
-  const timestamp = new Date(measuredAt).getTime();
-
-  if (!Number.isFinite(timestamp)) {
-    return true;
-  }
-
-  return Date.now() - timestamp > COIN_METRIC_STALE_AFTER_MINUTES * 60_000;
 }
 
 function globalLastUpdated(coins: BaseCoin[]) {
@@ -322,7 +312,16 @@ function sortCoins(coins: BaseCoin[], sort: CoinQueryOptions["sort"] = "score") 
     confidence: (a: BaseCoin, b: BaseCoin) => confidenceScore(b) - confidenceScore(a)
   } satisfies Record<NonNullable<CoinQueryOptions["sort"]>, (a: BaseCoin, b: BaseCoin) => number>;
 
-  return [...coins].sort(sorters[sort]);
+  return [...coins].sort((a, b) => {
+    const freshnessOrder = compareCoinMetricFreshness(a.measuredAt, b.measuredAt);
+
+    if (freshnessOrder !== 0) {
+      return freshnessOrder;
+    }
+
+    return sorters[sort](a, b) ||
+      new Date(b.measuredAt).getTime() - new Date(a.measuredAt).getTime();
+  });
 }
 
 function applyCoinFilters(coins: BaseCoin[], options: CoinQueryOptions) {
@@ -373,7 +372,7 @@ async function getCoinsFromSupabase(limit: number): Promise<{
       .from("base_coins")
       .select("*")
       .neq("verification_status", "rejected")
-      .order("score", { ascending: false })
+      .order("measured_at", { ascending: false })
       .limit(Math.max(20, Math.min(limit * 3, 300)));
 
     if (error) {

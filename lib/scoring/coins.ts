@@ -1,4 +1,5 @@
 import type { BaseCoin } from "@/lib/coins/types";
+import { coinFreshnessFactor } from "@/lib/coins/freshness";
 import { coinRiskPenalty, detectCoinRiskFlags } from "@/lib/risk/coins";
 
 function clamp(value: number, min = 0, max = 100) {
@@ -78,7 +79,8 @@ export function calculateCoinTrendScore(coin: BaseCoin) {
     txns: normalize(coin.txns24h, 2_000),
     buySell: buySellScore(coin.buys24h, coin.sells24h),
     priceMomentum: clamp(Math.max(0, coin.priceChange1h ?? coin.priceChange6h ?? 0)),
-    age: ageBoost(coin.pairCreatedAt)
+    age: ageBoost(coin.pairCreatedAt),
+    freshness: coinFreshnessFactor(coin.measuredAt) * 100
   };
   const rawScore =
     breakdown.liquidity * 0.18 +
@@ -90,12 +92,13 @@ export function calculateCoinTrendScore(coin: BaseCoin) {
     breakdown.priceMomentum * 0.06 +
     breakdown.age * 0.08;
   const liquidityGatePenalty = (coin.liquidityUsd ?? 0) <= 0 ? 40 : 0;
-  const score = clamp(
+  const activityScore = clamp(
     rawScore -
       confidencePenalty(coin.confidence) -
       coinRiskPenalty(riskFlags) -
       liquidityGatePenalty
   );
+  const score = activityScore * breakdown.freshness / 100;
 
   return {
     score: Number(score.toFixed(1)),
