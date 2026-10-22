@@ -341,20 +341,22 @@ Metric priority:
 Current protocol adapters:
 
 - `uniswap-base`: DefiLlama Base DEX volume and TVL, plus a dedicated 24h Base RPC router-log activity sample from the verified Base Uniswap router. TX/wallet fields are `N/A` if that RPC sample fails.
-- `aerodrome`: DefiLlama Base DEX volume and TVL, plus Base RPC contract-log activity estimates.
+- `aerodrome`: DefiLlama Base DEX volume and the sum of Base TVL from Aerodrome V1 and Slipstream, plus Base RPC contract-log activity estimates.
 - `zora`: Base RPC activity estimates first; DefiLlama Zora Coins DEX volume when available.
 - `aave-base`: DefiLlama Base TVL/fees, plus Base RPC contract-log activity estimates.
 - `moonwell`: DefiLlama Base TVL/fees, plus Base RPC contract-log activity estimates.
-- `compound-v3-base`, `morpho-base`, `fluid-base`, `euler-base`, `yearn-base`, `extra-finance`, `seamless-protocol`, `rodeo-finance`, `reserve-protocol`, and `beefy-base`: DefiLlama TVL/fees coverage where available; Base RPC activity is only used when verified contracts are configured.
+- `compound-v3-base`, `morpho-base`, `fluid-base`, `euler-base`, `yearn-base`, `extra-finance`, `seamless-protocol`, `reserve-protocol`, and `beefy-base`: DefiLlama Base TVL/fees coverage where available; Base RPC activity is only used when verified contracts are configured.
 - `pancakeswap-base`, `curve-base`, `pendle-base`, `balancer-base`, `quickswap-base`, `sushiswap-base`, and `superfluid-base`: DefiLlama Base overview rows for DEX/payment-style volume where available; no contract activity is fabricated when contracts are not verified.
-- `across-protocol-base`, `stargate-base`, `layerzero-base`, `hyperlane-base`, `axelar-base`, and `spark-base`: DefiLlama protocol TVL/fees coverage where available; coverage may remain limited if public Base-specific activity metrics are not exposed.
+- `across-protocol-base`, `stargate-base`, `layerzero-base`, `hyperlane-base`, `axelar-base`, and `spark-base`: DefiLlama Base-specific TVL/fees coverage where available; coverage may remain limited if public Base-specific metrics are not exposed. Across uses Base bridge fees, not Ethereum TVL.
+- `rodeo-finance`: no active adapter until a Base-specific source is verified; old mock rows do not count as fresh measurements.
 
 DefiLlama integration:
 
 - Uses official public API endpoints documented at https://api-docs.defillama.com.
 - Uses Base-specific DEX overview rows from `https://api.llama.fi/overview/dexs/base`.
 - Uses Base-specific fees overview rows from `https://api.llama.fi/overview/fees/base` for lending protocols when DEX volume is not the right metric.
-- Uses protocol TVL from `https://api.llama.fi/protocol/{slug}` with Base chain TVL where available.
+- Fees remain a separate metric and may inform trend scoring; they are never labeled as DEX volume.
+- Uses TVL from `https://api.llama.fi/protocol/{slug}` only when a Base chain TVL series exists. Total protocol TVL is never substituted for Base TVL.
 - Caches responses in-process. Default TTL is `DEFILLAMA_CACHE_TTL_SECONDS=1800`.
 - Times out and fails gracefully so refresh jobs keep running if DefiLlama is unavailable.
 
@@ -998,7 +1000,10 @@ Cron behavior:
   remains available, but avoid it when possible because URLs can enter logs.
 - For app metrics on cron-job.org, use `mode=fast&limit=2` every 10 minutes.
   Each call selects a different stable batch of two contract-tracked apps and
-  one adapter-only app. The daily Vercel backup runs the default pipeline but
+  two adapter-only apps. Up to 20 adapter-only apps therefore complete a cycle
+  within 100 minutes; source outages may still leave individual apps stale.
+  Apps without verified Base contracts or a reliable Base-specific adapter
+  remain unmeasured instead of receiving synthetic values. The daily Vercel backup runs the default pipeline but
   remains bounded by `MAX_INDEXER_APPS_PER_RUN`.
 - Missing or invalid secrets return `401`.
 - Failed refreshes return `503` rather than a misleading `200`; partial

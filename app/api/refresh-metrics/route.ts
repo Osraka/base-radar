@@ -24,7 +24,11 @@ import {
   rateLimitRefresh
 } from "@/lib/rateLimit";
 import { acquireRefreshLock, releaseRefreshLock } from "@/lib/refreshLocks";
-import { selectRotatingBatch } from "@/lib/refreshBatch";
+import {
+  FAST_ADAPTER_BATCH_SIZE,
+  FAST_REFRESH_INTERVAL_MS,
+  selectRotatingBatch
+} from "@/lib/refreshBatch";
 import { calculateGrowth, calculateTrendScore } from "@/lib/scoring";
 import {
   isValidEthereumAddress,
@@ -368,11 +372,7 @@ function createProtocolAdapterMetricRow(
 ) {
   const tx24h = toNumber(adapterMetrics.tx24h);
   const users24h = toNumber(adapterMetrics.users24h);
-  const volume24h = toNumber(
-    adapterMetrics.volume24hUsd ??
-      adapterMetrics.fees24hUsd ??
-      adapterMetrics.revenue24hUsd
-  );
+  const volume24h = toNumber(adapterMetrics.volume24hUsd);
   const tx7d = tx24h;
   const users7d = users24h;
   const metric = {
@@ -382,6 +382,8 @@ function createProtocolAdapterMetricRow(
     users24h,
     users7d,
     volume24h,
+    fees24hUsd: adapterMetrics.fees24hUsd ?? 0,
+    revenue24hUsd: adapterMetrics.revenue24hUsd ?? 0,
     volume7d: 0,
     growth24h: calculateGrowth(tx24h, previousMetric?.tx_24h),
     growth7d: calculateGrowth(tx7d, previousMetric?.tx_7d),
@@ -651,7 +653,7 @@ async function handleRefresh(request: Request) {
       ? selectRotatingBatch(
           [...contractCandidates].sort((a, b) => a.slug.localeCompare(b.slug)),
           maxApps,
-          10 * 60_000,
+          FAST_REFRESH_INTERVAL_MS,
           batchNow
         )
       : contractCandidates.slice(0, maxApps);
@@ -664,8 +666,8 @@ async function handleRefresh(request: Request) {
     const adapterOnlyApps = fastMode
       ? selectRotatingBatch(
           [...adapterOnlyCandidates].sort((a, b) => a.slug.localeCompare(b.slug)),
-          1,
-          10 * 60_000,
+          FAST_ADAPTER_BATCH_SIZE,
+          FAST_REFRESH_INTERVAL_MS,
           batchNow
         )
       : adapterOnlyCandidates.slice(0, maxApps);
@@ -695,7 +697,7 @@ async function handleRefresh(request: Request) {
 
     for (const app of approvedApps) {
       try {
-        const socialMetrics = await getSocialMetricsForApp({
+        const socialPromise = getSocialMetricsForApp({
           slug: app.slug,
           name: app.name,
           builderCode: app.builder_code
@@ -707,7 +709,10 @@ async function handleRefresh(request: Request) {
           }),
           INDEXER_APP_TIMEOUT_MS
         );
-        const activity = await activityPromise;
+        const [activity, socialMetrics] = await Promise.all([
+          activityPromise,
+          socialPromise
+        ]);
         const metricRow = createMetricRow(
           app,
           latestMetrics.get(app.id),
@@ -801,14 +806,19 @@ async function handleRefresh(request: Request) {
       }
 
       try {
-        const socialMetrics = await getSocialMetricsForApp({
-          slug: app.slug,
-          name: app.name,
-          builderCode: app.builder_code
-        });
-        const adapterMetrics = await adapter.getMetrics();
+        const [socialMetrics, adapterMetrics] = await Promise.all([
+          getSocialMetricsForApp({
+            slug: app.slug,
+            name: app.name,
+            builderCode: app.builder_code
+          }),
+          adapter.getMetrics()
+        ]);
 
         if (!isMetricReliable(adapterMetrics)) {
+          console.info("[protocol-adapter] no reliable Base metric", {
+            slug: app.slug
+          });
           continue;
         }
 

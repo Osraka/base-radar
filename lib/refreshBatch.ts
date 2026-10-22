@@ -1,3 +1,6 @@
+export const FAST_REFRESH_INTERVAL_MS = 10 * 60_000;
+export const FAST_ADAPTER_BATCH_SIZE = 2;
+
 export function selectRotatingBatch<T>(
   items: readonly T[],
   batchSize: number,

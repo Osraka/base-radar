@@ -165,7 +165,7 @@ const stubDir = path.join(rootDir, "scripts/stubs");
 fs.mkdirSync(stubDir, { recursive: true });
 fs.writeFileSync(path.join(stubDir, "server-only.js"), "module.exports = {};\n");
 
-const { fetchProtocolMetrics } = loadTsModule(
+const { fetchProtocolMetrics, normalizeDefiLlamaMetrics } = loadTsModule(
   path.join(rootDir, "lib/integrations/defillama.ts")
 );
 const { getProtocolAdapter, getProtocolAdapterSlugs } = loadTsModule(
@@ -174,7 +174,8 @@ const { getProtocolAdapter, getProtocolAdapterSlugs } = loadTsModule(
 
 await check("DefiLlama fetch works", async () => {
   const metrics = await fetchProtocolMetrics({
-    protocolSlug: "aerodrome",
+    protocolSlug: "aerodrome-v1",
+    additionalBaseTvlSlugs: ["aerodrome-slipstream"],
     baseDexSlugs: ["aerodrome-v1", "aerodrome-slipstream"]
   });
 
@@ -195,7 +196,6 @@ await check("Registered adapters are present", async () => {
     "compound-v3-base",
     "extra-finance",
     "seamless-protocol",
-    "rodeo-finance",
     "reserve-protocol",
     "across-protocol-base",
     "stargate-base",
@@ -219,6 +219,42 @@ await check("Registered adapters are present", async () => {
     assert(slugs.includes(slug), `${slug} adapter is missing.`);
   }
   return slugs.join(", ");
+});
+
+await check("Base TVL never falls back to whole-protocol TVL", async () => {
+  const metric = normalizeDefiLlamaMetrics({
+    protocol: {
+      tvl: [{ date: 1, totalLiquidityUSD: 18_000_000 }],
+      chainTvls: { Ethereum: { tvl: [{ date: 1, totalLiquidityUSD: 18_000_000 }] } }
+    },
+    baseFeeProtocols: [{ slug: "across", total24h: 134 }]
+  });
+  assert(metric?.fees24hUsd === 134, "Base fees should remain available.");
+  assert(metric.tvlUsd === undefined, "Ethereum TVL must not be displayed as Base TVL.");
+  assert(
+    normalizeDefiLlamaMetrics({ protocol: { tvl: [{ date: 1, totalLiquidityUSD: 18_000_000 }] } }) === null,
+    "A global-only protocol value must not create a Base metric."
+  );
+  const combined = normalizeDefiLlamaMetrics({
+    protocol: { chainTvls: { Base: { tvl: [{ date: 1, totalLiquidityUSD: 10 }] } } },
+    additionalProtocols: [
+      { chainTvls: { Base: { tvl: [{ date: 1, totalLiquidityUSD: 15 }] } } }
+    ]
+  });
+  assert(combined?.tvlUsd === 25, "Distinct Base-only subprotocol TVL should combine.");
+  return "Base fees retained; unrelated protocol TVL discarded.";
+});
+
+await check("Across has a Base fee source; Rodeo has no unsupported adapter", async () => {
+  const across = getProtocolAdapter("across-protocol-base");
+  assert(across, "Across adapter missing.");
+  const metrics = await across.getMetrics();
+  assertAdapterShape(metrics);
+  assert((metrics.fees24hUsd ?? 0) > 0, "Across Base fees are unavailable.");
+  assert(metrics.volume24hUsd === undefined, "Across fees must not masquerade as DEX volume.");
+  assert(metrics.tvlUsd === undefined, "Across Ethereum TVL must not be shown for Base.");
+  assert(!getProtocolAdapter("rodeo-finance"), "Rodeo has no verified Base metric source.");
+  return `Across Base fees=${Math.round(metrics.fees24hUsd)}; Rodeo remains unmeasured.`;
 });
 
 await check("Adapter fallback works without Base RPC context", async () => {

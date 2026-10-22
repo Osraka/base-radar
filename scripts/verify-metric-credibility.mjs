@@ -204,6 +204,25 @@ await check("Economic metrics remain visible", () => {
   return "volume remains the primary protocol signal.";
 });
 
+await check("Fee-only Base activity stays labeled as fees", () => {
+  const feesOnly = metric({
+    tx24h: 0,
+    tx7d: 0,
+    users24h: 0,
+    users7d: 0,
+    volume24h: 0,
+    volume24hUsd: 0,
+    tvlUsd: 0,
+    fees24hUsd: 134,
+    metricOrigin: "defillama"
+  });
+  const display = getEconomicMetricDisplayState(feesOnly);
+  assert(display.label === "24h Fees", "Base bridge fees must not be labeled as volume.");
+  assert(display.value === 134, "The verified fee value should stay visible.");
+  assert(calculateTrendScore(feesOnly) > 0, "Verified fees should remain a weak economic signal.");
+  return "Across-style fee-only metrics remain separate from volume.";
+});
+
 await check("Trend score reduces unreliable user influence", () => {
   const app = { slug: "uniswap-base", name: "Uniswap on Base" };
   const unreliable = metric({ users24h: 9, users7d: 63 });

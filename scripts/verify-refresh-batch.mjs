@@ -10,7 +10,7 @@ const source = readFileSync(
 const compiled = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 }
 }).outputText;
-const { selectRotatingBatch } = await import(
+const { FAST_ADAPTER_BATCH_SIZE, FAST_REFRESH_INTERVAL_MS, selectRotatingBatch } = await import(
   `data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`
 );
 
@@ -33,4 +33,35 @@ assert.equal(seen.size, apps.length, "Each app should be selected within one cyc
 assert.deepEqual(selectRotatingBatch([], 2, intervalMs, 0), []);
 assert.deepEqual(selectRotatingBatch(apps, 2, intervalMs, 6 * intervalMs), ["app-0", "app-1"]);
 
-process.stdout.write("PASS: rotating batches cover all apps within six 10-minute slots.\n");
+const adapterApps = Array.from({ length: 20 }, (_, index) => `adapter-${index}`);
+const adapterSeen = new Set();
+const adapterSlots = Math.ceil(adapterApps.length / FAST_ADAPTER_BATCH_SIZE);
+
+for (let slot = 0; slot < adapterSlots; slot += 1) {
+  const now = slot * FAST_REFRESH_INTERVAL_MS;
+  const batch = selectRotatingBatch(
+    adapterApps,
+    FAST_ADAPTER_BATCH_SIZE,
+    FAST_REFRESH_INTERVAL_MS,
+    now
+  );
+  batch.forEach((app) => adapterSeen.add(app));
+  assert.deepEqual(
+    batch,
+    selectRotatingBatch(
+      adapterApps,
+      FAST_ADAPTER_BATCH_SIZE,
+      FAST_REFRESH_INTERVAL_MS,
+      now + 1000
+    ),
+    "Adapter retries in the same slot must remain stable."
+  );
+}
+
+assert.equal(adapterSeen.size, adapterApps.length);
+assert.ok(
+  adapterSlots * FAST_REFRESH_INTERVAL_MS <= 2 * 60 * 60_000,
+  "The adapter rotation must fit within the two-hour freshness window."
+);
+
+process.stdout.write("PASS: contract and adapter rotation are stable; 20 adapters complete in 100 minutes.\n");

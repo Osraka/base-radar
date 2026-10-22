@@ -15,7 +15,8 @@ const adapterFactories: Record<string, AdapterFactory> = {
     createHybridProtocolAdapter(
       {
         slug: "aerodrome",
-        defillamaProtocolSlug: "aerodrome",
+        defillamaProtocolSlug: "aerodrome-v1",
+        defillamaAdditionalBaseTvlSlugs: ["aerodrome-slipstream"],
         defillamaBaseDexSlugs: ["aerodrome-v1", "aerodrome-slipstream"],
         supportsVolume: true,
         supportsUsers: true,
@@ -109,19 +110,6 @@ const adapterFactories: Record<string, AdapterFactory> = {
       },
       context
     ),
-  "rodeo-finance": (context) =>
-    createHybridProtocolAdapter(
-      {
-        slug: "rodeo-finance",
-        defillamaProtocolSlug: "rodeo-finance",
-        supportsVolume: false,
-        supportsUsers: true,
-        supportsTxs: true,
-        notes:
-          "Rodeo Finance adapter: DefiLlama protocol TVL plus conservative Base RPC contract-log activity where configured."
-      },
-      context
-    ),
   "reserve-protocol": (context) =>
     createHybridProtocolAdapter(
       {
@@ -139,12 +127,13 @@ const adapterFactories: Record<string, AdapterFactory> = {
     createHybridProtocolAdapter(
       {
         slug: "across-protocol-base",
-        defillamaProtocolSlug: "across-v3",
+        defillamaProtocolSlug: "across",
+        defillamaBaseFeeSlugs: ["across"],
         supportsVolume: false,
         supportsUsers: false,
         supportsTxs: true,
         notes:
-          "Across Protocol on Base adapter: DefiLlama Across v3 protocol metrics plus conservative Base RPC contract-log activity where configured."
+          "Across Protocol on Base adapter: DefiLlama Base-specific bridge fees; TVL is shown only if Base chain TVL is published."
       },
       context
     ),

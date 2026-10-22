@@ -10,6 +10,7 @@ import type {
 interface HybridProtocolAdapterConfig {
   slug: string;
   defillamaProtocolSlug?: string;
+  defillamaAdditionalBaseTvlSlugs?: string[];
   defillamaBaseDexSlugs?: string[];
   defillamaBaseFeeSlugs?: string[];
   preferBaseRpcActivity?: boolean;
@@ -53,6 +54,7 @@ export function createHybridProtocolAdapter(
           config.defillamaProtocolSlug
             ? fetchProtocolMetrics({
                 protocolSlug: config.defillamaProtocolSlug,
+                additionalBaseTvlSlugs: config.defillamaAdditionalBaseTvlSlugs,
                 baseDexSlugs: config.defillamaBaseDexSlugs,
                 baseFeeSlugs: config.defillamaBaseFeeSlugs
               })

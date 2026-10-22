@@ -11,10 +11,6 @@ interface CacheEntry<T> {
 interface DefiLlamaProtocolResponse {
   name?: string;
   slug?: string;
-  tvl?: Array<{
-    date: number;
-    totalLiquidityUSD: number;
-  }>;
   chainTvls?: Record<
     string,
     {
@@ -129,12 +125,16 @@ export async function fetchProtocolBySlug(slug: string) {
 
 export async function fetchProtocolMetrics(input: {
   protocolSlug: string;
+  additionalBaseTvlSlugs?: string[];
   baseDexSlugs?: string[];
   baseFeeSlugs?: string[];
   includeFees?: boolean;
 }): Promise<DefiLlamaMetrics | null> {
-  const [protocol, dexOverview, feeOverview] = await Promise.all([
-    fetchProtocolBySlug(input.protocolSlug),
+  const [protocols, dexOverview, feeOverview] = await Promise.all([
+    Promise.all(
+      [...new Set([input.protocolSlug, ...(input.additionalBaseTvlSlugs ?? [])])]
+        .map((slug) => fetchProtocolBySlug(slug))
+    ),
     input.baseDexSlugs?.length
       ? fetchJsonWithCache<DefiLlamaOverviewResponse>("/overview/dexs/base")
       : Promise.resolve(null),
@@ -144,7 +144,8 @@ export async function fetchProtocolMetrics(input: {
   ]);
 
   return normalizeDefiLlamaMetrics({
-    protocol,
+    protocol: protocols[0],
+    additionalProtocols: protocols.slice(1),
     baseDexProtocols: findBaseDexProtocol(dexOverview, input.baseDexSlugs ?? []),
     baseFeeProtocols: findBaseDexProtocol(
       feeOverview,
@@ -155,11 +156,16 @@ export async function fetchProtocolMetrics(input: {
 
 export function normalizeDefiLlamaMetrics(input: {
   protocol: DefiLlamaProtocolResponse | null;
+  additionalProtocols?: Array<DefiLlamaProtocolResponse | null>;
   baseDexProtocols?: DefiLlamaOverviewProtocol[];
   baseFeeProtocols?: DefiLlamaOverviewProtocol[];
 }): DefiLlamaMetrics | null {
-  const baseTvl = latestTvlFromSeries(input.protocol?.chainTvls?.Base?.tvl);
-  const totalTvl = latestTvlFromSeries(input.protocol?.tvl);
+  const baseTvlValues = [input.protocol, ...(input.additionalProtocols ?? [])]
+    .map((protocol) => latestTvlFromSeries(protocol?.chainTvls?.Base?.tvl))
+    .filter((value): value is number => value !== undefined);
+  const baseTvl = baseTvlValues.length > 0
+    ? baseTvlValues.reduce((total, value) => total + value, 0)
+    : undefined;
   const dexVolume24hUsd = toPositiveNumber(
     (input.baseDexProtocols ?? []).reduce(
       (total, protocol) => total + Number(protocol.total24h ?? 0),
@@ -179,18 +185,18 @@ export function normalizeDefiLlamaMetrics(input: {
     )
   );
 
-  if (!baseTvl && !totalTvl && !dexVolume24hUsd && !fees24hUsd) {
+  if (!baseTvl && !dexVolume24hUsd && !fees24hUsd) {
     return null;
   }
 
   return {
-    tvlUsd: baseTvl ?? totalTvl,
+    tvlUsd: baseTvl,
     dexVolume24hUsd,
     dexVolume7dUsd,
     fees24hUsd,
     revenue24hUsd: undefined,
     source: "defillama",
     notes:
-      "DefiLlama public API metrics. TVL uses Base chain TVL when available; DEX volume and fees use Base-specific overview rows."
+      "DefiLlama public API metrics. TVL is shown only when Base chain TVL is available; DEX volume and fees use Base-specific overview rows."
   };
 }

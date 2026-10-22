@@ -205,8 +205,14 @@ export function calculateTrendScore(
     growthScore(metrics.growth24h, TREND_BENCHMARKS.maxTxGrowth) * txWeight;
   const userGrowthScore =
     growthScore(userGrowth, TREND_BENCHMARKS.maxUserGrowth) * userWeight;
+  const economicSignal = Math.max(
+    metrics.volume24h,
+    metrics.volume24hUsd ?? 0,
+    (metrics.fees24hUsd ?? 0) * 20,
+    (metrics.revenue24hUsd ?? 0) * 20
+  );
   const volumeScore =
-    normalize(metrics.volume24h, TREND_BENCHMARKS.maxVolume24h) * economicWeight;
+    normalize(economicSignal, TREND_BENCHMARKS.maxVolume24h) * economicWeight;
   const tvlScore =
     normalize(metrics.tvlUsd ?? 0, TREND_BENCHMARKS.maxTvlUsd) * economicWeight;
   const socialScore = isSocialDataUnavailable(metrics as AppMetrics)

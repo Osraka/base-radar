@@ -296,7 +296,9 @@ function toAppMetric(row: SupabaseMetricRow): AppMetrics {
     tx7d: toNumber(row.tx_7d),
     users24h: toNumber(row.unique_users_24h),
     users7d: toNumber(row.unique_users_7d),
-    volume24h: volume24hUsd || fees24hUsd || revenue24hUsd || toNumber(row.volume_24h),
+    volume24h: row.source === "protocol_adapter"
+      ? volume24hUsd
+      : toNumber(row.volume_24h),
     volume7d: toNumber(row.volume_7d),
     growth24h: toNullableNumber(row.growth_24h),
     growth7d: toNullableNumber(row.growth_7d),

@@ -244,13 +244,13 @@ export const verifiedRealApps: VerifiedRealAppSeed[] = [
     websiteUrl: "https://www.rodeo.finance",
     logoUrl: "https://www.rodeo.finance/favicon.ico",
     contractAddresses: [],
-    defiLlamaSlug: "rodeo-finance",
+    defiLlamaSlug: null,
     sourceUrls: [
       "https://www.rodeo.finance",
-      "https://defillama.com/protocol/rodeo-finance"
+      "https://defillama.com/protocol/rodeo"
     ],
     sourceNotes:
-      "Rodeo Finance is listed with DefiLlama protocol coverage; no unverified contract address is seeded."
+      "Rodeo's public DefiLlama page describes a deprecated Arbitrum protocol. No verified Base contract or Base-specific metric source is configured; this listing has limited coverage."
   },
   {
     slug: "reserve-protocol",
@@ -278,14 +278,14 @@ export const verifiedRealApps: VerifiedRealAppSeed[] = [
     websiteUrl: "https://across.to",
     logoUrl: "https://across.to/favicon.ico",
     contractAddresses: [],
-    defiLlamaSlug: "across-v3",
+    defiLlamaSlug: "across",
     sourceUrls: [
       "https://across.to",
       "https://docs.across.to/",
-      "https://defillama.com/protocol/across-v3"
+      "https://defillama.com/protocol/across"
     ],
     sourceNotes:
-      "Across is listed as a Base bridge with DefiLlama protocol coverage; no unverified Base contract address is seeded."
+      "Across Base-specific bridge fees are available in DefiLlama's Base fees overview; total protocol TVL is not treated as Base TVL. No unverified Base contract address is seeded."
   },
   {
     slug: "stargate-base",
