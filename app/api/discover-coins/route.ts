@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { verifyRefreshRequest } from "@/lib/cronAuth";
 import { finishCoinJobRun, startCoinJobRun } from "@/lib/coins/jobRuns";
-import { discoverBaseCoins } from "@/lib/discovery/coins";
+import { discoverBaseCoins, type CoinDiscoverySummary } from "@/lib/discovery/coins";
 import {
   RATE_LIMITED_ERROR,
   rateLimitHeaders,
@@ -11,6 +11,25 @@ import { acquireRefreshLock, releaseRefreshLock } from "@/lib/refreshLocks";
 import { securityHeaders } from "@/lib/security";
 
 export const revalidate = 0;
+
+function compactDiscoverySummary(summary: CoinDiscoverySummary): Omit<CoinDiscoverySummary, "coins"> {
+  return {
+    ok: summary.ok,
+    success: summary.success,
+    startedAt: summary.startedAt,
+    finishedAt: summary.finishedAt,
+    measuredAt: summary.measuredAt,
+    discoveredCount: summary.discoveredCount,
+    refreshedCount: summary.refreshedCount,
+    updatedCount: summary.updatedCount,
+    skippedCount: summary.skippedCount,
+    failedCount: summary.failedCount,
+    persistenceFailedCount: summary.persistenceFailedCount,
+    persistenceAvailable: summary.persistenceAvailable,
+    warnings: summary.warnings,
+    source: summary.source
+  };
+}
 
 function unauthorizedResponse(rateLimit?: Awaited<ReturnType<typeof rateLimitRefresh>>) {
   return NextResponse.json(
@@ -27,6 +46,8 @@ function unauthorizedResponse(rateLimit?: Awaited<ReturnType<typeof rateLimitRef
 
 async function handleDiscover(request: Request) {
   const startedAt = new Date().toISOString();
+  const { searchParams } = new URL(request.url);
+  const compactResponse = searchParams.get("summary") === "1";
   const auth = verifyRefreshRequest(request);
 
   if (!auth.authorized) {
@@ -49,24 +70,25 @@ async function handleDiscover(request: Request) {
   }
 
   if (!acquireRefreshLock("coin-discovery", 9 * 60_000)) {
+    const summary: CoinDiscoverySummary = {
+      ok: true,
+      success: true,
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      measuredAt: startedAt,
+      discoveredCount: 0,
+      refreshedCount: 0,
+      updatedCount: 0,
+      skippedCount: 0,
+      failedCount: 0,
+      persistenceFailedCount: 0,
+      persistenceAvailable: false,
+      warnings: ["Coin discovery is already running; duplicate execution skipped."],
+      coins: [],
+      source: "dexscreener"
+    };
     return NextResponse.json(
-      {
-        ok: true,
-        success: true,
-        startedAt,
-        finishedAt: new Date().toISOString(),
-        measuredAt: startedAt,
-        discoveredCount: 0,
-        refreshedCount: 0,
-        updatedCount: 0,
-        skippedCount: 0,
-        failedCount: 0,
-        persistenceFailedCount: 0,
-        persistenceAvailable: false,
-        warnings: ["Coin discovery is already running; duplicate execution skipped."],
-        coins: [],
-        source: "dexscreener"
-      },
+      compactResponse ? compactDiscoverySummary(summary) : summary,
       {
         headers: {
           ...securityHeaders(rateLimit),
@@ -80,7 +102,6 @@ async function handleDiscover(request: Request) {
   const runId = await startCoinJobRun("discovery");
 
   try {
-    const { searchParams } = new URL(request.url);
     const configuredLimit =
       Number(process.env.COIN_DISCOVERY_LIMIT_PER_BUCKET ?? 50) || 50;
     const limitPerBucket = Math.max(
@@ -102,7 +123,7 @@ async function handleDiscover(request: Request) {
       warnings: summary.warnings
     });
 
-    return NextResponse.json(summary, {
+    return NextResponse.json(compactResponse ? compactDiscoverySummary(summary) : summary, {
       status: summary.success ? 200 : 503,
       headers: {
         ...securityHeaders(rateLimit),
@@ -125,24 +146,25 @@ async function handleDiscover(request: Request) {
       error: error instanceof Error ? error.name : "UnknownCoinDiscoveryError"
     });
 
+    const summary: CoinDiscoverySummary = {
+      ok: false,
+      success: false,
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      measuredAt: startedAt,
+      discoveredCount: 0,
+      refreshedCount: 0,
+      updatedCount: 0,
+      skippedCount: 0,
+      failedCount: 1,
+      persistenceFailedCount: 0,
+      persistenceAvailable: false,
+      warnings: ["Coin discovery failed gracefully; retry later."],
+      coins: [],
+      source: "dexscreener"
+    };
     return NextResponse.json(
-      {
-        ok: false,
-        success: false,
-        startedAt,
-        finishedAt: new Date().toISOString(),
-        measuredAt: startedAt,
-        discoveredCount: 0,
-        refreshedCount: 0,
-        updatedCount: 0,
-        skippedCount: 0,
-        failedCount: 1,
-        persistenceFailedCount: 0,
-        persistenceAvailable: false,
-        warnings: ["Coin discovery failed gracefully; retry later."],
-        coins: [],
-        source: "dexscreener"
-      },
+      compactResponse ? compactDiscoverySummary(summary) : summary,
       {
         status: 503,
         headers: {

@@ -998,7 +998,8 @@ Cron behavior:
   remains available, but avoid it when possible because URLs can enter logs.
 - For app metrics on cron-job.org, use `mode=fast&limit=2` every 10 minutes.
   Each call selects a different stable batch of two contract-tracked apps and
-  one adapter-only app. The daily Vercel backup still runs the full pipeline.
+  one adapter-only app. The daily Vercel backup runs the default pipeline but
+  remains bounded by `MAX_INDEXER_APPS_PER_RUN`.
 - Missing or invalid secrets return `401`.
 - Failed refreshes return `503` rather than a misleading `200`; partial
   successes retain their safe aggregate counters.
@@ -1051,9 +1052,12 @@ Job 1 — Discover new Base coins:
 
 - Frequency: every 10 minutes
 - URL:
-  `https://base-radar.vercel.app/api/discover-coins`
+  `https://base-radar.vercel.app/api/discover-coins?summary=1`
 - Expected success status: `200`
 - Expected response: `success: true`, plus discovered/refreshed/skipped/failure counters
+- `summary=1` omits the large `coins` response array only. It does not lower
+  the configured discovery limit, change persistence, or reduce source coverage.
+  Keep the existing Authorization header; do not put the secret in the URL.
 - Health fields to watch: `lastCoinDiscoveryAt`, `isCoinDiscoveryStale`, `warnings`
 
 Job 2 — Refresh tracked coin metrics:
@@ -1102,6 +1106,12 @@ Job 3 — Refresh app metrics in rotating short batches:
 - Expected success status: `200`
 - Expected response: app metrics counters such as `processedApps`, `skippedApps`, and `errors`
 - Health fields to watch: `lastAppRefreshAt`, `isAppDataStale`, `latestRefreshStatus`, `warnings`
+- Health reports this as a rotating partial batch every 10 minutes. Its
+  `lastAppRefreshAt` and `isAppDataStale` describe the newest measured app,
+  not proof that every tracked app was refreshed. `recentlyMeasuredAppCount`
+  and `isAppCoverageLimited` show approved-app coverage over the same two-hour
+  window. The bounded default-mode Vercel backup is daily; use per-app measured
+  timestamps to assess individual coverage.
 
 cron-job.org settings:
 

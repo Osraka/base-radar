@@ -139,6 +139,11 @@ await check("/api/health returns structured JSON", async () => {
   assert(["healthy", "degraded"].includes(body.status), "status should be healthy or degraded.");
   assert(["production", "development", "mock"].includes(body.mode), "mode invalid.");
   assert(typeof body.coinSchemaAvailable === "boolean", "coinSchemaAvailable missing.");
+  assert(body.appMetricFreshnessScope === "latest-measured-app", "App freshness scope is unclear.");
+  assert(body.appMetricRefreshCoverage === "rotating-partial-batches", "Partial app coverage is not disclosed.");
+  assert(body.recentlyMeasuredAppCount === null || typeof body.recentlyMeasuredAppCount === "number", "Recent app count is invalid.");
+  assert(body.isAppCoverageLimited === null || typeof body.isAppCoverageLimited === "boolean", "App coverage flag is invalid.");
+  assert(body.cronFrequency?.metrics?.includes("every 10 minutes"), "Fast app cron frequency is incorrect.");
   assert(Array.isArray(body.warnings), "warnings missing.");
   assertNoSecret(text, "/api/health");
   return `status=${body.status}, coinSchema=${body.coinSchemaAvailable}.`;
@@ -210,7 +215,7 @@ await check("valid refresh secret does not return 401", async () => {
     return "skipped; REFRESH_SECRET missing.";
   }
 
-  const { response, body, text } = await fetchJson("/api/discover-coins?limit=8", {
+  const { response, body, text } = await fetchJson("/api/discover-coins?limit=8&summary=1", {
     headers: {
       authorization: `Bearer ${secret}`
     }
@@ -218,6 +223,8 @@ await check("valid refresh secret does not return 401", async () => {
   assert(response.status !== 401, "Valid secret returned 401.");
   assertNot500(response, "valid refresh secret");
   assert(body?.ok === true, "refresh response ok missing.");
+  assert(!("coins" in body), "Compact cron response still includes coins.");
+  assert(text.length < 10_000, "Compact cron response is too large.");
   assertNoSecret(text, "valid refresh secret");
   return `status=${response.status}, persistence=${body.persistenceAvailable}.`;
 });

@@ -19,6 +19,7 @@ import { securityHeaders } from "@/lib/security";
 
 interface HealthCounts {
   appCount: number;
+  recentlyMeasuredAppCount: number | null;
   coinCount: number;
   appLastUpdated: string | null;
   coinLastUpdated: string | null;
@@ -91,6 +92,7 @@ async function getHealthCounts(): Promise<HealthCounts> {
   if (!isSupabaseServerConfigured()) {
     return {
       appCount: 0,
+      recentlyMeasuredAppCount: null,
       coinCount: 0,
       appLastUpdated: null,
       coinLastUpdated: null,
@@ -106,7 +108,7 @@ async function getHealthCounts(): Promise<HealthCounts> {
   const checks = await Promise.allSettled([
     supabase
       .from("apps")
-      .select("id", { count: "exact", head: true })
+      .select("id", { count: "exact" })
       .eq("status", "approved"),
     supabase
       .from("app_metrics")
@@ -158,6 +160,36 @@ async function getHealthCounts(): Promise<HealthCounts> {
     warnings.push("Latest coin timestamp could not be read from Supabase.");
   }
 
+  let recentlyMeasuredAppCount: number | null = null;
+  if (appCountResult.status === "fulfilled" && !appCountResult.value.error) {
+    const approvedIds = (appCountResult.value.data ?? []).map((app) => app.id);
+    if (approvedIds.length === appCountResult.value.count && approvedIds.length > 0) {
+      try {
+        const { data, error } = await supabase
+          .from("app_metrics")
+          .select("app_id")
+          .in("app_id", approvedIds)
+          .gte(
+            "measured_at",
+            new Date(Date.now() - APP_METRIC_STALE_AFTER_MINUTES * 60_000).toISOString()
+          )
+          .limit(1000);
+
+        if (!error && data && data.length < 1000) {
+          recentlyMeasuredAppCount = new Set(data.map((metric) => metric.app_id)).size;
+        } else {
+          warnings.push("Recent app metric coverage could not be measured completely.");
+        }
+      } catch {
+        warnings.push("Recent app metric coverage could not be measured completely.");
+      }
+    } else if (approvedIds.length === 0 && appCountResult.value.count === 0) {
+      recentlyMeasuredAppCount = 0;
+    } else {
+      warnings.push("Approved app coverage exceeds the health query limit.");
+    }
+  }
+
   const coinData = latestCoinResult.status === "fulfilled"
     ? latestCoinResult.value.data
     : null;
@@ -166,6 +198,7 @@ async function getHealthCounts(): Promise<HealthCounts> {
     appCount: appCountResult.status === "fulfilled"
       ? appCountResult.value.count ?? 0
       : 0,
+    recentlyMeasuredAppCount,
     coinCount: coinCountResult.status === "fulfilled"
       ? coinCountResult.value.count ?? 0
       : 0,
@@ -185,6 +218,7 @@ async function getHealthCounts(): Promise<HealthCounts> {
 export async function GET() {
   const counts = await getHealthCounts().catch(() => ({
     appCount: 0,
+    recentlyMeasuredAppCount: null,
     coinCount: 0,
     appLastUpdated: null,
     coinLastUpdated: null,
@@ -242,6 +276,10 @@ export async function GET() {
       coinSchemaAvailable: coinSchemaStatus.available,
       schedulerMode: "external-cron",
       appCount: counts.appCount,
+      recentlyMeasuredAppCount: counts.recentlyMeasuredAppCount,
+      isAppCoverageLimited: counts.recentlyMeasuredAppCount === null
+        ? null
+        : counts.recentlyMeasuredAppCount < counts.appCount,
       coinCount: counts.coinCount,
       globalLastUpdated,
       coinLastUpdated: counts.coinLastUpdated,
@@ -250,10 +288,13 @@ export async function GET() {
       lastAppRefreshAt: counts.appLastUpdated,
       latestRefreshStatus: counts.latestRefreshStatus,
       isAppDataStale,
+      appMetricFreshnessScope: "latest-measured-app",
+      appMetricRefreshCoverage: "rotating-partial-batches",
       isCoinDataStale,
       isCoinDiscoveryStale,
       cronFrequency: {
-        metrics: "external: every 60 minutes",
+        metrics: "external: every 10 minutes (rotating partial batch)",
+        metricsFullBackup: "Vercel: daily default-mode backup (bounded by app limit)",
         coinDiscovery: "external: every 10 minutes",
         coinRefresh: "external: every 15 minutes",
         vercelBackup: "daily"
