@@ -95,14 +95,14 @@ function growthSortValue(app: AppWithMetrics) {
 
 function growthToneClass(growth: number | null) {
   if (growth === null) {
-    return "text-blue-100";
+    return "text-muted-foreground";
   }
 
   return growth >= 0 ? "text-emerald-300" : "text-rose-300";
 }
 
 function growthLabel(growth: number | null) {
-  return growth === null ? "New" : formatPercent(growth);
+  return formatPercent(growth);
 }
 
 function appEngagementScore(app: AppWithMetrics) {
@@ -203,6 +203,8 @@ export function DashboardClient({
   );
 
   const stats = useMemo(() => {
+    const txCoveredApps = rankedApps.filter((app) => shouldShowNumericTxs(app.metrics, app));
+    const walletCoveredApps = rankedApps.filter((app) => shouldShowNumericUsers(app.metrics, app));
     const totalTx24h = rankedApps.reduce(
       (sum, app) => sum + (shouldShowNumericTxs(app.metrics, app) ? app.metrics.tx24h : 0),
       0
@@ -216,7 +218,13 @@ export function DashboardClient({
       .filter((app) => app.metrics.growth24h !== null)
       .sort((a, b) => growthSortValue(b) - growthSortValue(a))[0];
 
-    return { totalTx24h, totalTrackedWallets, fastestGrowing };
+    return {
+      totalTx24h,
+      totalTrackedWallets,
+      txCoveredAppCount: txCoveredApps.length,
+      walletCoveredAppCount: walletCoveredApps.length,
+      fastestGrowing
+    };
   }, [rankedApps]);
 
   const leadingApp = rankedApps[0];
@@ -319,6 +327,7 @@ export function DashboardClient({
                       "metric-tabular text-sm font-semibold",
                       growthToneClass(app.metrics.growth24h)
                     )}
+                    title={app.metrics.growth24h === null ? "No verified previous-day growth baseline." : undefined}
                   >
                     {growthLabel(app.metrics.growth24h)}
                   </span>
@@ -339,16 +348,20 @@ export function DashboardClient({
             tone="blue"
           />
           <StatCard
-            label="Total 24h txs"
-            value={formatCompact(stats.totalTx24h)}
-            detail="Reliable tracked activity only"
+            label="Tracked 24h TXs"
+            value={stats.txCoveredAppCount > 0 ? formatCompact(stats.totalTx24h) : "—"}
+            detail={stats.txCoveredAppCount > 0
+              ? `From ${stats.txCoveredAppCount} of ${rankedApps.length} apps; not Base-wide.`
+              : "No verified contract activity tracked yet."}
             icon={Activity}
             tone="green"
           />
           <StatCard
-            label="Tracked wallets"
-            value={formatCompact(stats.totalTrackedWallets)}
-            detail="Reliable wallet coverage only"
+            label="Tracked wallet observations"
+            value={stats.walletCoveredAppCount > 0 ? formatCompact(stats.totalTrackedWallets) : "—"}
+            detail={stats.walletCoveredAppCount > 0
+              ? `Across ${stats.walletCoveredAppCount} apps; wallets may overlap.`
+              : "No verified wallet activity tracked yet."}
             icon={Users}
             tone="pink"
           />

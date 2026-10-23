@@ -55,6 +55,7 @@ function loadTsModule(filename) {
   const output = ts.transpileModule(source, {
     compilerOptions: {
       esModuleInterop: true,
+      jsx: ts.JsxEmit.ReactJSX,
       module: ts.ModuleKind.CommonJS,
       target: ts.ScriptTarget.ES2022
     },
@@ -131,13 +132,75 @@ const {
   shouldShowNumericUsers,
   userReliabilityWeight
 } = loadTsModule(path.join(rootDir, "lib/metrics/reliability.ts"));
+const { getComparableHistoryPoints } = loadTsModule(
+  path.join(rootDir, "lib/metrics/history.ts")
+);
 const { calculateGrowth, calculateTrendScore } = loadTsModule(path.join(rootDir, "lib/scoring.ts"));
+const React = Module.createRequire(import.meta.url)("react");
+const { renderToStaticMarkup } = Module.createRequire(import.meta.url)("react-dom/server");
+const { MetricBadge } = loadTsModule(path.join(rootDir, "components/MetricBadge.tsx"));
+const { ShareCard } = loadTsModule(path.join(rootDir, "components/ShareCard.tsx"));
 
 await check("Growth is not calculated from missing baseline", () => {
   assert(calculateGrowth(100, null) === null, "Null previous value should return null.");
   assert(calculateGrowth(100, 0) === null, "Zero previous value should return null.");
   assert(calculateGrowth(150, 100) === 50, "Valid previous value should calculate normally.");
   return "missing or zero previous values produce no fake +100% growth.";
+});
+
+await check("Missing growth is not presented as a new app or a gain", () => {
+  const badge = renderToStaticMarkup(React.createElement(MetricBadge, { value: null }));
+  const app = {
+    id: "app-test",
+    slug: "test-app",
+    name: "Test App",
+    logoUrl: "https://example.com/logo.png",
+    metrics: metric({ growth24h: null })
+  };
+  const share = renderToStaticMarkup(React.createElement(ShareCard, { app, rank: 1 }));
+
+  assert(badge.includes("no verified previous-day baseline"), "Null-growth badge lacks context.");
+  assert(!badge.includes("New"), "Missing growth is falsely labeled New.");
+  assert(share.includes("not available"), "Share card should explain missing growth.");
+  assert(!share.includes("newly measured"), "Share card falsely claims new measurement.");
+  return "badge and share card use missing-baseline language.";
+});
+
+await check("History excludes other sources and out-of-window observations", () => {
+  const now = Date.parse("2026-10-23T12:00:00.000Z");
+  const latest = metric({ measuredAt: new Date(now).toISOString(), volume24hUsd: 200 });
+  const app = { id: "app-test", slug: "test-app", name: "Test App", metrics: latest };
+  const history = [
+    metric({ measuredAt: new Date(now - 25 * 3_600_000).toISOString(), volume24hUsd: 999 }),
+    metric({ measuredAt: new Date(now - 3_600_000).toISOString(), volume24hUsd: 100 }),
+    metric({ measuredAt: new Date(now - 1_800_000).toISOString(), volume24hUsd: 800, source: "base_rpc" }),
+    metric({ measuredAt: new Date(now - 900_000).toISOString(), volume24hUsd: 700, metricOrigin: "other" }),
+    latest
+  ];
+  const points = getComparableHistoryPoints(history, app, "volume", 24, now);
+
+  assert(points.length === 2, "Only two comparable 24h points should remain.");
+  assert(points[0].value === 100 && points[1].value === 200, "History used a different source or time window.");
+  assert(
+    getComparableHistoryPoints(history, app, "volume", 0.1, now).length === 1,
+    "A short range must not borrow out-of-window points."
+  );
+  return "source, origin, and time window remain comparable.";
+});
+
+await check("History omits unmeasured zero series and unreliable activity", () => {
+  const now = Date.parse("2026-10-23T12:00:00.000Z");
+  const older = metric({ measuredAt: new Date(now - 3_600_000).toISOString() });
+  const latest = metric({ measuredAt: new Date(now).toISOString(), volume24hUsd: 0, volume24h: 0 });
+  const app = { id: "app-test", slug: "uniswap-base", name: "Uniswap on Base", metrics: latest };
+
+  assert(getComparableHistoryPoints([older, latest], app, "volume", 24, now).length === 0,
+    "An unavailable current metric must not display an older nonzero chart.");
+  assert(getComparableHistoryPoints([older, latest], app, "tx", 24, now).length === 0,
+    "Small low-confidence protocol-adapter TXs must not create a chart.");
+  assert(getComparableHistoryPoints([older, latest], app, "wallets", 24, now).length === 0,
+    "Small low-confidence protocol-adapter wallets must not create a chart.");
+  return "no synthetic zero or weak activity series is plotted.";
 });
 
 await check("Uniswap hides tiny tracked-wallet estimate", () => {

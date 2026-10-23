@@ -1,4 +1,4 @@
-import { Sparkles, TrendingDown, TrendingUp } from "lucide-react";
+import { TrendingDown, TrendingUp } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn, formatPercent } from "@/lib/utils";
 
@@ -10,9 +10,12 @@ interface MetricBadgeProps {
 export function MetricBadge({ value, label = "24h" }: MetricBadgeProps) {
   if (value === null) {
     return (
-      <Badge className="gap-1 border-blue-400/30 bg-blue-400/10 text-blue-100 metric-tabular">
-        <Sparkles className="h-3 w-3" />
-        New
+      <Badge
+        className="metric-tabular border-white/10 bg-white/[0.04] text-muted-foreground"
+        title="24h growth needs a verified previous-day baseline."
+        aria-label="24h growth unavailable: no verified previous-day baseline"
+      >
+        —
       </Badge>
     );
   }

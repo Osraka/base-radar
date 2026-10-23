@@ -3,11 +3,14 @@
 import { useMemo, useState } from "react";
 import { Activity, BarChart3, DollarSign, Users, WalletCards } from "lucide-react";
 import { EmptyState } from "@/components/EmptyState";
-import type { AppMetrics } from "@/lib/types";
+import { getComparableHistoryPoints } from "@/lib/metrics/history";
+import type { AppMetrics, AppWithMetrics } from "@/lib/types";
 import { cn, formatCompact, formatCurrency } from "@/lib/utils";
 
 interface MetricHistoryChartProps {
+  app: AppWithMetrics;
   history: AppMetrics[];
+  asOf: string;
 }
 
 type RangeKey = "24h" | "7d" | "30d";
@@ -24,7 +27,6 @@ const seriesConfig = [
     label: "TX",
     icon: Activity,
     color: "#60a5fa",
-    value: (metric: AppMetrics) => metric.tx24h,
     format: formatCompact
   },
   {
@@ -32,7 +34,6 @@ const seriesConfig = [
     label: "Wallets",
     icon: Users,
     color: "#34d399",
-    value: (metric: AppMetrics) => metric.users24h,
     format: formatCompact
   },
   {
@@ -40,7 +41,6 @@ const seriesConfig = [
     label: "Volume",
     icon: WalletCards,
     color: "#f472b6",
-    value: (metric: AppMetrics) => metric.volume24hUsd ?? metric.volume24h,
     format: formatCurrency
   },
   {
@@ -48,7 +48,6 @@ const seriesConfig = [
     label: "TVL",
     icon: BarChart3,
     color: "#a78bfa",
-    value: (metric: AppMetrics) => metric.tvlUsd ?? 0,
     format: formatCurrency
   },
   {
@@ -56,7 +55,6 @@ const seriesConfig = [
     label: "Fees",
     icon: DollarSign,
     color: "#fbbf24",
-    value: (metric: AppMetrics) => metric.fees24hUsd ?? 0,
     format: formatCurrency
   }
 ] as const;
@@ -81,16 +79,18 @@ function makePath(values: number[]) {
     .join(" ");
 }
 
-export function MetricHistoryChart({ history }: MetricHistoryChartProps) {
+export function MetricHistoryChart({ app, history, asOf }: MetricHistoryChartProps) {
   const [range, setRange] = useState<RangeKey>("7d");
-  const filteredHistory = useMemo(() => {
+  const series = useMemo(() => {
     const selectedRange = ranges.find((item) => item.key === range) ?? ranges[1];
-    const since = Date.now() - selectedRange.hours * 3_600_000;
-    return history.filter((metric) => new Date(metric.measuredAt).getTime() >= since);
-  }, [history, range]);
-
-  const usableHistory = filteredHistory.length > 0 ? filteredHistory : history.slice(-2);
-  const hasEnoughHistory = usableHistory.length >= 2;
+    const now = new Date(asOf).getTime();
+    return seriesConfig.map((config) => ({
+      ...config,
+      points: getComparableHistoryPoints(history, app, config.key, selectedRange.hours, now)
+    }));
+  }, [app, asOf, history, range]);
+  const availableSeries = series.filter((item) => item.points.length >= 2);
+  const missingSeries = series.filter((item) => item.points.length < 2);
 
   return (
     <div>
@@ -98,7 +98,7 @@ export function MetricHistoryChart({ history }: MetricHistoryChartProps) {
         <div>
           <h3 className="text-lg font-semibold text-white">Metric history</h3>
           <p className="mt-1 text-sm text-muted-foreground">
-            Historical rows come from stored refresh runs. Missing series are not backfilled.
+            Stored observations from the same source; missing periods are not backfilled.
           </p>
         </div>
         <div className="flex rounded-lg border border-white/10 bg-white/[0.025] p-1">
@@ -119,23 +119,24 @@ export function MetricHistoryChart({ history }: MetricHistoryChartProps) {
         </div>
       </div>
 
-      {!hasEnoughHistory ? (
+      {availableSeries.length === 0 ? (
         <EmptyState
-          title="Not enough history yet."
-          description="Scheduled refresh runs will fill this chart over time."
+          title="No comparable history yet."
+          description="At least two measured points from the same source are needed in this period. Scheduled refreshes will add observations over time."
         />
       ) : (
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {seriesConfig.map((series) => {
-            const values = usableHistory.map(series.value);
-            const latest = values.at(-1) ?? 0;
-            const first = values[0] ?? 0;
-            const delta = first > 0 ? ((latest - first) / first) * 100 : 0;
+        <>
+          <div className="grid gap-x-6 gap-y-5 md:grid-cols-2 xl:grid-cols-3">
+          {availableSeries.map((series) => {
+            const values = series.points.map((point) => point.value);
+            const latest = values.at(-1)!;
+            const first = values[0];
+            const delta = ((latest - first) / first) * 100;
             const path = makePath(values);
             const Icon = series.icon;
 
             return (
-              <div key={series.key} className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+              <div key={series.key} className="min-w-0 border-t border-white/10 pt-4">
                 <div className="mb-3 flex items-start justify-between gap-3">
                   <div>
                     <div className="flex items-center gap-2 text-sm font-medium text-white">
@@ -149,19 +150,21 @@ export function MetricHistoryChart({ history }: MetricHistoryChartProps) {
                   <span
                     className={cn(
                       "metric-tabular rounded-md px-2 py-1 text-xs",
-                      delta >= 0
+                      delta > 0
                         ? "bg-emerald-400/10 text-emerald-200"
-                        : "bg-rose-400/10 text-rose-200"
+                        : delta < 0
+                          ? "bg-rose-400/10 text-rose-200"
+                          : "bg-white/[0.06] text-muted-foreground"
                     )}
                   >
-                    {delta >= 0 ? "+" : ""}
+                    {delta > 0 ? "+" : ""}
                     {delta.toFixed(Math.abs(delta) >= 100 ? 0 : 1)}%
                   </span>
                 </div>
                 <svg
                   viewBox="0 0 280 78"
                   role="img"
-                  aria-label={`${series.label} trend`}
+                  aria-label={`${series.label} trend over ${range}, ${series.points.length} measured points`}
                   className="h-24 w-full overflow-visible"
                 >
                   <path d="M 0 74 L 280 74" stroke="rgba(255,255,255,0.08)" />
@@ -177,7 +180,13 @@ export function MetricHistoryChart({ history }: MetricHistoryChartProps) {
               </div>
             );
           })}
-        </div>
+          </div>
+          {missingSeries.length > 0 ? (
+            <p className="mt-5 text-xs text-muted-foreground">
+              Insufficient comparable history: {missingSeries.map((item) => item.label).join(", ")}.
+            </p>
+          ) : null}
+        </>
       )}
     </div>
   );

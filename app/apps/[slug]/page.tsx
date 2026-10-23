@@ -31,7 +31,8 @@ import { getAppBySlug, getMetricHistoryForApp, getRadarSnapshot } from "@/lib/da
 import {
   getEconomicMetricDisplayState,
   getMetricDisplayState,
-  getSocialDisplayState
+  getSocialDisplayState,
+  isSocialDataUnavailable
 } from "@/lib/metrics/reliability";
 import type { AppMetrics } from "@/lib/types";
 import {
@@ -95,11 +96,15 @@ function whyTrending(
           ? "tracked wallets are compounding over the week"
           : "the tracked wallet base is stable";
   const socialSignal =
-    (metrics.socialMentions7d ?? metrics.socialMentions24h) > 500
-      ? "social mentions are rising across Farcaster"
-      : "social mentions are contributing a smaller but positive signal";
+    isSocialDataUnavailable(metrics)
+      ? "Farcaster data is temporarily unavailable"
+      : (metrics.socialMentions7d ?? metrics.socialMentions24h) > 500
+        ? "Farcaster mentions add a strong supplementary signal"
+        : (metrics.socialMentions7d ?? metrics.socialMentions24h) > 0
+          ? "Farcaster mentions add a small supplementary signal"
+          : "no verified social momentum is available";
 
-  return `${appName} is trending because ${growthSignal}, ${userSignal}, and ${socialSignal}.`;
+  return `${appName}'s score reflects ${growthSignal}, ${userSignal}, and ${socialSignal}.`;
 }
 
 function growthPillClass(growth: number | null) {
@@ -111,7 +116,7 @@ function growthPillClass(growth: number | null) {
 }
 
 function growthPillLabel(growth: number | null) {
-  return growth === null ? "New 24h" : `${formatPercent(growth)} 24h`;
+  return growth === null ? "No 24h baseline" : `${formatPercent(growth)} 24h`;
 }
 
 export default async function AppDetailPage({ params }: AppDetailPageProps) {
@@ -377,7 +382,11 @@ export default async function AppDetailPage({ params }: AppDetailPageProps) {
                 <CardTitle>24h / 7d / 30d trends</CardTitle>
               </CardHeader>
               <CardContent>
-                <MetricHistoryChart history={metricHistory} />
+                <MetricHistoryChart
+                  app={app}
+                  history={metricHistory}
+                  asOf={snapshot.calculatedAt ?? new Date().toISOString()}
+                />
               </CardContent>
             </Card>
 

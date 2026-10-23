@@ -11,11 +11,11 @@ export function ShareCard({ app, rank }: ShareCardProps) {
   const growthCopy =
     app.metrics.growth24h === null ? (
       <>
-        {app.name} is newly measured on Base Radar
+        Verified 24h growth is not available for {app.name} yet
       </>
     ) : (
       <>
-        {app.name} is up{" "}
+        {app.name} tracked activity changed{" "}
         <span className="metric-tabular font-semibold text-white">
           {formatPercent(app.metrics.growth24h)}
         </span>{" "}

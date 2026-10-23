@@ -422,14 +422,14 @@ export async function getMetricHistoryForApp(
         .select(METRIC_HISTORY_SELECT)
         .eq("app_id", sanitizeText(appId, 120))
         .gte("measured_at", since)
-        .order("measured_at", { ascending: true })
-        .limit(500);
+        .order("measured_at", { ascending: false })
+        .limit(1000);
 
       if (error) {
         return [];
       }
 
-      return ((data ?? []) as SupabaseMetricRow[]).map(toAppMetric);
+      return ((data ?? []) as SupabaseMetricRow[]).reverse().map(toAppMetric);
     } catch {
       return [];
     }
@@ -440,23 +440,7 @@ export async function getMetricHistoryForApp(
     return [];
   }
 
-  return Array.from({ length: safeDays }, (_, index) => {
-    const drift = 0.76 + index / safeDays * 0.24;
-    const measuredAt = new Date(
-      Date.now() - (safeDays - index - 1) * 86_400_000
-    ).toISOString();
-
-    return {
-      ...currentMetric,
-      tx24h: Math.round(currentMetric.tx24h * drift),
-      users24h: Math.round(currentMetric.users24h * drift),
-      volume24h: Math.round(currentMetric.volume24h * drift),
-      volume24hUsd: Math.round((currentMetric.volume24hUsd ?? currentMetric.volume24h) * drift),
-      tvlUsd: Math.round((currentMetric.tvlUsd ?? 0) * drift),
-      fees24hUsd: Math.round((currentMetric.fees24hUsd ?? 0) * drift),
-      measuredAt
-    };
-  });
+  return [currentMetric];
 }
 
 export async function getTrendingApps(limit = 6): Promise<AppWithMetrics[]> {
