@@ -8,8 +8,13 @@ interface ShareCardProps {
 }
 
 export function ShareCard({ app, rank }: ShareCardProps) {
+  const hasVerifiedGrowth = app.metrics.growth24h !== null &&
+    app.metrics.source !== "mock" &&
+    app.metrics.confidence !== "low" &&
+    (app.metrics.coverage === "high" || app.metrics.coverage === "medium") &&
+    app.ranking?.isStale === false;
   const growthCopy =
-    app.metrics.growth24h === null ? (
+    !hasVerifiedGrowth ? (
       <>
         Verified 24h growth is not available for {app.name} yet
       </>
@@ -40,12 +45,12 @@ export function ShareCard({ app, rank }: ShareCardProps) {
               <h3 className="truncate text-base font-semibold text-white sm:text-xl">{app.name}</h3>
             </div>
           </div>
-          <Badge className="shrink-0">#{rank} Trending</Badge>
+          <Badge className="shrink-0">App rank #{rank}</Badge>
         </div>
 
         <div>
           <p className="text-2xl font-semibold tracking-normal text-white sm:text-3xl">
-            #{rank} Trending on Base Today
+            #{rank} in Base app rankings
           </p>
           <p className="mt-2 text-base text-blue-100 sm:text-lg">{growthCopy}</p>
         </div>

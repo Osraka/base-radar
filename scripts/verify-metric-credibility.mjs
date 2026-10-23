@@ -227,6 +227,29 @@ await check("Missing growth is not presented as a new app or a gain", () => {
   return "badge and share card use missing-baseline language.";
 });
 
+await check("Share card does not claim trending today from sparse metrics", () => {
+  const app = {
+    id: "app-test", slug: "test-app", name: "Test App",
+    logoUrl: "https://example.com/logo.png",
+    metrics: metric({ growth24h: 80, confidence: "low" }),
+    ranking: { isStale: false }
+  };
+  const weak = renderToStaticMarkup(React.createElement(ShareCard, { app, rank: 1 }));
+  assert(weak.includes("#1 in Base app rankings"), "Share card lost its objective rank.");
+  assert(!weak.includes("Trending on Base Today") && !weak.includes("+80.0%"),
+    "Low-confidence data was promoted as a daily trend.");
+  const verified = renderToStaticMarkup(React.createElement(ShareCard, {
+    app: { ...app, metrics: { ...app.metrics, confidence: "medium" } }, rank: 1
+  }));
+  assert(verified.includes("+80.0%"), "Verified recent growth is hidden unnecessarily.");
+  const stale = renderToStaticMarkup(React.createElement(ShareCard, {
+    app: { ...app, metrics: { ...app.metrics, confidence: "medium" },
+      ranking: { isStale: true } }, rank: 1
+  }));
+  assert(!stale.includes("+80.0%"), "Stale growth was used for sharing.");
+  return "only medium-or-better fresh measurements can enter growth copy.";
+});
+
 await check("History excludes other sources and out-of-window observations", () => {
   const now = Date.parse("2026-10-23T12:00:00.000Z");
   const latest = metric({ measuredAt: new Date(now).toISOString(), volume24hUsd: 200 });
