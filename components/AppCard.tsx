@@ -10,6 +10,7 @@ import {
 import { DataReliability } from "@/components/DataReliability";
 import { MetricBadge } from "@/components/MetricBadge";
 import { ScoreExplainer } from "@/components/ScoreExplainer";
+import { WatchlistButton } from "@/components/WatchlistButton";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -90,13 +91,16 @@ export function AppCard({ app, rank }: AppCardProps) {
                 </div>
               </div>
             </div>
-            <Link
-              href={`/apps/${app.slug}`}
-              aria-label={`${app.name} detaylarını görüntüle`}
-              className="rounded-md p-1 text-muted-foreground transition hover:bg-white/[0.06] hover:text-primary"
-            >
-              <ArrowUpRight className="h-4 w-4 shrink-0" />
-            </Link>
+            <div className="flex shrink-0 items-center gap-1">
+              <WatchlistButton kind="app" id={app.slug} label={app.name} compact />
+              <Link
+                href={`/apps/${app.slug}`}
+                aria-label={`${app.name} detaylarını görüntüle`}
+                className="inline-flex h-11 w-11 items-center justify-center rounded-md text-muted-foreground transition hover:bg-white/[0.06] hover:text-primary"
+              >
+                <ArrowUpRight className="h-4 w-4 shrink-0" />
+              </Link>
+            </div>
           </div>
 
           <p className="mt-4 line-clamp-2 text-sm leading-6 text-muted-foreground">

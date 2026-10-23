@@ -5,6 +5,7 @@ import { AlertTriangle, ArrowUpRight, CircleHelp, Coins, ExternalLink } from "lu
 import { DataFreshness } from "@/components/DataFreshness";
 import { Footer } from "@/components/Footer";
 import { Header } from "@/components/Header";
+import { WatchlistButton } from "@/components/WatchlistButton";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { COIN_METRIC_STALE_AFTER_MINUTES } from "@/lib/constants";
@@ -99,6 +100,9 @@ export default async function CoinDetailPage({
                 <p className="mt-2 text-sm text-muted-foreground">
                   {coin.name} · Rank #{coin.rank} · {coin.dex ?? "DEX pair"}
                 </p>
+                <div className="mt-4">
+                  <WatchlistButton kind="coin" id={coin.tokenAddress} label={coin.symbol} />
+                </div>
               </div>
               <Badge className={cn("gap-1", coin.isStale
                 ? "border-amber-400/30 bg-amber-400/10 text-amber-100"

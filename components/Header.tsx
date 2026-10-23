@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Coins, Radar, Send, TrendingUp } from "lucide-react";
+import { Coins, Radar, Send, Star, TrendingUp } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button";
 import { USE_MOCK_DATA } from "@/lib/constants";
 import { cn } from "@/lib/utils";
@@ -38,19 +38,24 @@ export function Header() {
             <Coins className="h-4 w-4" />
             Coins
           </Link>
+          <Link href="/watchlist" className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}>
+            <Star className="h-4 w-4" />
+            Watchlist
+          </Link>
           <Link href="/submit" className={cn(buttonVariants({ variant: "secondary", size: "sm" }))}>
             <Send className="h-4 w-4" />
             Submit
           </Link>
         </nav>
 
-        <Link
-          href="/submit"
-          className={cn(buttonVariants({ variant: "secondary", size: "icon" }), "md:hidden")}
-          aria-label="Submit app"
-        >
-          <Send className="h-4 w-4" />
-        </Link>
+        <div className="flex items-center gap-2 md:hidden">
+          <Link href="/watchlist" className={cn(buttonVariants({ variant: "ghost", size: "icon" }))} aria-label="Watchlist">
+            <Star className="h-4 w-4" />
+          </Link>
+          <Link href="/submit" className={cn(buttonVariants({ variant: "secondary", size: "icon" }))} aria-label="Submit app">
+            <Send className="h-4 w-4" />
+          </Link>
+        </div>
       </div>
     </header>
   );

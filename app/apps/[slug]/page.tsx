@@ -24,6 +24,7 @@ import { MetricHistoryChart } from "@/components/MetricHistoryChart";
 import { ReportIncorrectDataForm } from "@/components/ReportIncorrectDataForm";
 import { ScoreExplainer } from "@/components/ScoreExplainer";
 import { ShareCard } from "@/components/ShareCard";
+import { WatchlistButton } from "@/components/WatchlistButton";
 import { StatCard } from "@/components/StatCard";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
@@ -192,6 +193,7 @@ export default async function AppDetailPage({ params }: AppDetailPageProps) {
                       {app.description}
                     </p>
                     <div className="mt-6 flex flex-wrap gap-3">
+                      <WatchlistButton kind="app" id={app.slug} label={app.name} />
                       <a
                         href={app.websiteUrl}
                         target="_blank"

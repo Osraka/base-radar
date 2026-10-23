@@ -142,6 +142,8 @@ const { calculateAppRankingSignals, calculateAppTrendScore } = loadTsModule(
   path.join(rootDir, "lib/scoring/apps.ts")
 );
 const { rankAppSnapshot } = loadTsModule(path.join(rootDir, "lib/ranking/apps.ts"));
+const { compareAppMetrics } = loadTsModule(path.join(rootDir, "lib/metrics/comparison.ts"));
+const { parseWatchlist } = loadTsModule(path.join(rootDir, "lib/watchlist.ts"));
 const baseClient = loadTsModule(path.join(rootDir, "lib/baseClient.ts"));
 const { getRecentContractActivity } = loadTsModule(path.join(rootDir, "lib/indexer/baseActivity.ts"));
 const React = Module.createRequire(import.meta.url)("react");
@@ -551,6 +553,57 @@ await check("Central app rank downweights unverified RPC activity", () => {
   assert(calculateAppTrendScore(app.metrics, app) === largeScore,
     "Ranking service uses a different scoring path than the exported app scorer.");
   return "central rank uses app identity when applying metric reliability.";
+});
+
+await check("Local watchlist rejects malformed and duplicate browser entries", () => {
+  const address = `0x${"a".repeat(40)}`;
+  const entries = parseWatchlist(JSON.stringify([
+    { kind: "app", id: "moonwell", label: "Moonwell" },
+    { kind: "app", id: "moonwell", label: "Duplicate" },
+    { kind: "coin", id: address.toUpperCase().replace("0X", "0x"), label: "TOKEN" },
+    { kind: "coin", id: "0xinvalid", label: "Invalid token" },
+    { kind: "app", id: "../admin", label: "Invalid app" }
+  ]));
+  assert(entries.length === 2, "Invalid or duplicate local entries survived parsing.");
+  assert(entries[1].id === address, "Coin address was not normalized.");
+  assert(parseWatchlist("{broken").length === 0, "Malformed storage crashed parsing.");
+  return "local storage stays bounded to valid unique app/coin identifiers.";
+});
+
+await check("App comparison accepts only compatible measured values", () => {
+  const now = Date.now();
+  const app = (slug, overrides = {}) => ({
+    slug, name: slug, contractAddresses: [`0x${"a".repeat(40)}`],
+    metrics: metric({
+      source: "protocol_adapter", metricOrigin: "defillama",
+      confidence: "medium", coverage: "medium", tx24h: 80,
+      users24h: 150, volume24h: 2_500_000, volume24hUsd: 2_500_000,
+      tvlUsd: 50_000_000, fees24hUsd: 4_000,
+      measuredAt: new Date(now - 10 * 60_000).toISOString(), ...overrides
+    })
+  });
+  const first = app("first-protocol");
+  const second = app("second-protocol", { volume24hUsd: 0, volume24h: 1_000_000 });
+  const rows = compareAppMetrics(first, second, now);
+  assert(rows.every((row) => row.reason === null), "Compatible observations were rejected.");
+  assert(rows.find((row) => row.label === "24h volume")?.second === 1_000_000,
+    "Valid legacy volume was hidden by an empty USD column.");
+
+  const mismatched = compareAppMetrics(first, app("other", { metricOrigin: "base_rpc" }), now);
+  assert(mismatched.every((row) => row.first === null && row.reason),
+    "Different measurement methods were presented as comparable.");
+  const stale = compareAppMetrics(first, app("old", {
+    measuredAt: new Date(now - 3 * 3_600_000).toISOString()
+  }), now);
+  assert(stale.every((row) => row.first === null && row.reason),
+    "Stale observations were presented as comparable.");
+  const weak = compareAppMetrics(first, app("weak", { confidence: "low" }), now);
+  assert(weak.every((row) => row.first === null && row.reason),
+    "Low-confidence observations were presented as comparable.");
+  const missing = compareAppMetrics(first, app("missing", { tvlUsd: 0 }), now);
+  assert(missing.find((row) => row.label === "TVL")?.second === null,
+    "Missing TVL was rendered as an observed zero.");
+  return "method, window, confidence and missing-value guards preserve comparison integrity.";
 });
 
 for (const result of results) {

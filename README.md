@@ -1222,6 +1222,12 @@ Production recommendation:
 - Product analytics are **planned, not enabled**. Proposed aggregate events are `app_detail_open` (source view and approved app slug), `coin_detail_open` (source view and address), `discovery_cohort_select` (cohort name), and `return_visit` (coarse first-party returning-session flag). Do not send wallet addresses, IPs, contact details, searches, referral query strings, or raw user identifiers as event properties.
 - Before enabling measurement, choose an analytics provider, configure retention and any applicable consent controls, and document the collection purpose. Count aggregate events only; do not claim traffic, conversion or repeat-visit results without actual analytics or Search Console access.
 
+## Local Watchlist and App Comparison
+
+- Star an app or coin detail to save it in this browser. `/watchlist` is browser-local, has no login or server write, and is not indexed by search engines. Clearing local storage or changing devices removes the list; the page explains this before use.
+- App comparison requires two saved, public apps with recent snapshots from the same metric source and measurement method, medium-or-better confidence/coverage, and available reliable observations. Incompatible metrics show a reason instead of a fabricated zero or ratio.
+- Coin watchlisting does not endorse a token or provide an investment recommendation. The watchlist stores only public slugs, contract addresses and display names, up to 100 items.
+
 ## Architecture
 
 - UI reads app data through `lib/data.ts` only.
