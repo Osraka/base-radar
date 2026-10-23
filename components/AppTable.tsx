@@ -70,7 +70,7 @@ function getSortValue(app: AppWithMetrics, key: SortKey, originalRank: number) {
 }
 
 export function AppTable({ apps, rankById }: AppTableProps) {
-  const [sortKey, setSortKey] = useState<SortKey>("trendScore");
+  const [sortKey, setSortKey] = useState<SortKey | null>(null);
   const [direction, setDirection] = useState<"asc" | "desc">("desc");
 
   const rankedWithOriginalIndex = useMemo(
@@ -79,6 +79,8 @@ export function AppTable({ apps, rankById }: AppTableProps) {
   );
 
   const sortedApps = useMemo(() => {
+    if (sortKey === null) return rankedWithOriginalIndex;
+
     return [...rankedWithOriginalIndex].sort((a, b) => {
       const aValue = getSortValue(a.app, sortKey, a.originalRank);
       const bValue = getSortValue(b.app, sortKey, b.originalRank);
@@ -114,32 +116,6 @@ export function AppTable({ apps, rankById }: AppTableProps) {
 
   return (
     <>
-      <div className="mb-3 flex items-center justify-between gap-3 md:hidden">
-        <label htmlFor="mobile-sort" className="text-xs font-medium uppercase text-muted-foreground">
-          Sort
-        </label>
-        <select
-          id="mobile-sort"
-          value={`${sortKey}:${direction}`}
-          onChange={(event) => {
-            const [nextKey, nextDirection] = event.target.value.split(":") as [
-              SortKey,
-              "asc" | "desc"
-            ];
-            setSortKey(nextKey);
-            setDirection(nextDirection);
-          }}
-          className="h-10 rounded-md border border-input bg-white/[0.04] px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <option value="trendScore:desc" className="bg-[#07101f]">Trend score</option>
-          <option value="rank:asc" className="bg-[#07101f]">Rank</option>
-          <option value="growth24h:desc" className="bg-[#07101f]">Growth</option>
-          <option value="tx24h:desc" className="bg-[#07101f]">24h txs</option>
-          <option value="users24h:desc" className="bg-[#07101f]">Tracked wallets</option>
-          <option value="volume24h:desc" className="bg-[#07101f]">Volume / TVL</option>
-        </select>
-      </div>
-
       <div className="hidden overflow-hidden rounded-lg border border-white/10 md:block">
         <table className="w-full border-collapse text-sm">
           <thead className="bg-white/[0.035]">

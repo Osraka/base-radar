@@ -82,6 +82,7 @@ export type AppWithMetrics = BaseApp & {
   metrics: AppMetrics;
   ranking?: {
     rank?: number;
+    isStale?: boolean;
     signals: AppRankingSignals;
   };
 };

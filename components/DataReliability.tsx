@@ -8,7 +8,7 @@ interface DataReliabilityProps {
   compact?: boolean;
 }
 
-function originLabel(origin?: string | null) {
+export function originLabel(origin?: string | null) {
   if (!origin) {
     return "unavailable";
   }

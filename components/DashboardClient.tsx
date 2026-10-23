@@ -19,17 +19,19 @@ import {
 } from "lucide-react";
 import { AppTable } from "@/components/AppTable";
 import { CategoryFilter } from "@/components/CategoryFilter";
+import { CoinRadarPreview } from "@/components/CoinRadarPreview";
 import { DataFreshness } from "@/components/DataFreshness";
+import { originLabel } from "@/components/DataReliability";
 import { EmptyState } from "@/components/EmptyState";
 import { SearchBar } from "@/components/SearchBar";
 import { ScoreExplainer } from "@/components/ScoreExplainer";
 import { SocialTrends } from "@/components/SocialTrends";
 import { StatCard } from "@/components/StatCard";
-import { TokenTrends } from "@/components/TokenTrends";
 import { TrendingApps } from "@/components/TrendingApps";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
+  getEconomicMetricDisplayState,
   getSocialDisplayState,
   shouldShowNumericTxs,
   shouldShowNumericUsers
@@ -37,7 +39,7 @@ import {
 import type { BaseSocialTrend } from "@/lib/social/types";
 import type { BaseTokenTrend, TokenRadarBucket } from "@/lib/tokens/types";
 import type { AppCategory, AppWithMetrics, MetricConfidence } from "@/lib/types";
-import { cn, formatCompact, formatNumber, formatPercent } from "@/lib/utils";
+import { cn, formatCompact, formatCurrency, formatNumber, formatPercent, relativeTime } from "@/lib/utils";
 
 interface DashboardClientProps {
   apps: AppWithMetrics[];
@@ -93,18 +95,6 @@ function useDebouncedValue(value: string, delayMs = 180) {
 
 function growthSortValue(app: AppWithMetrics) {
   return app.metrics.growth24h ?? Number.NEGATIVE_INFINITY;
-}
-
-function growthToneClass(growth: number | null) {
-  if (growth === null) {
-    return "text-muted-foreground";
-  }
-
-  return growth >= 0 ? "text-emerald-300" : "text-rose-300";
-}
-
-function growthLabel(growth: number | null) {
-  return formatPercent(growth);
 }
 
 export function DashboardClient({
@@ -202,7 +192,11 @@ export function DashboardClient({
       0
     );
     const fastestGrowing = rankedApps
-      .filter((app) => app.metrics.growth24h !== null)
+      .filter((app) =>
+        app.metrics.growth24h !== null &&
+        !app.ranking?.isStale &&
+        app.metrics.confidence !== "low"
+      )
       .sort((a, b) => growthSortValue(b) - growthSortValue(a))[0];
 
     return {
@@ -215,6 +209,15 @@ export function DashboardClient({
   }, [rankedApps]);
 
   const leadingApp = rankedApps[0];
+  const featuredApp = rankedApps.find((app) =>
+    !app.ranking?.isStale &&
+    app.metrics.confidence !== "low" &&
+    (app.ranking?.signals.activityScore ?? 0) > 0 &&
+    getEconomicMetricDisplayState(app.metrics).showNumeric
+  );
+  const featuredEconomic = featuredApp
+    ? getEconomicMetricDisplayState(featuredApp.metrics)
+    : null;
   const hasActiveFilters =
     category !== "All" ||
     confidence !== "All" ||
@@ -231,101 +234,51 @@ export function DashboardClient({
 
   return (
     <main>
-      <section className="relative overflow-hidden border-b border-white/10">
-        <div className="terminal-grid absolute inset-0 opacity-70" />
-        <div className="relative mx-auto grid max-w-7xl gap-8 px-4 py-12 sm:px-6 lg:grid-cols-[1.05fr_0.95fr] lg:px-8 lg:py-16">
-          <div className="max-w-3xl">
-            <Badge className="mb-5">Live Base app radar</Badge>
-            <h1 className="max-w-3xl text-4xl font-semibold tracking-normal text-white sm:text-5xl lg:text-6xl">
-              Discover what&apos;s gaining traction on Base before everyone else.
-            </h1>
-            <p className="mt-5 max-w-2xl text-base leading-7 text-muted-foreground sm:text-lg">
-              Track Base apps, protocols, agents, mini apps, and onchain growth
-              signals with source-aware confidence and coverage labels.
-            </p>
-            <div className="mt-7 flex flex-col gap-3 sm:flex-row">
-              <Link href="#trending" className={cn(buttonVariants({ size: "lg" }))}>
-                Explore Trending Apps
-                <ArrowRight className="h-4 w-4" />
-              </Link>
-              <Link
-                href="/submit"
-                className={cn(buttonVariants({ variant: "secondary", size: "lg" }))}
-              >
-                Submit Your App
-              </Link>
-            </div>
-            <div className="mt-5 flex flex-wrap gap-2">
-              {[
-                { label: "Apps", href: "#trending", icon: RadarIcon },
-                { label: "Coins", href: "/coins", icon: Coins },
-                { label: "New Coins", href: "/coins?new=true&sort=newest", icon: Rocket },
-                { label: "Hot Emerging", href: "/coins?sort=volume1h", icon: LineChart },
-                { label: "Verified Metadata", href: "/coins?verified=true&risk=lower", icon: ShieldCheck }
-              ].map((item) => {
-                const ItemIcon = item.icon;
-
-                return (
-                  <Link
-                    key={item.label}
-                    href={item.href}
-                    className="inline-flex h-9 items-center gap-2 rounded-md border border-white/10 bg-white/[0.035] px-3 text-sm font-medium text-muted-foreground transition hover:border-primary/40 hover:text-white"
-                  >
-                    <ItemIcon className="h-4 w-4" />
-                    {item.label}
-                  </Link>
-                );
-              })}
-            </div>
-            <DataFreshness
-              lastUpdated={globalLastUpdated}
-              isStale={isDataStale}
-              staleAfterMinutes={staleAfterMinutes}
-              className="mt-5"
-            />
-          </div>
-
-          <div className="rounded-lg border border-white/10 bg-black/20 p-4 backdrop-blur">
-            <div className="flex items-center justify-between border-b border-white/10 pb-3">
-              <div>
-                <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
-                  Terminal
-                </p>
-                <p className="text-sm font-medium text-white">Base ecosystem flow</p>
-              </div>
-              <span className="h-2.5 w-2.5 rounded-full bg-emerald-400 shadow-[0_0_18px_rgba(52,211,153,0.9)]" />
-            </div>
-            <div className="mt-4 space-y-3">
-              {rankedApps.slice(0, 5).map((app, index) => (
-                <Link
-                  key={app.id}
-                  href={`/apps/${app.slug}`}
-                  className="grid grid-cols-[2rem_1fr_auto] items-center gap-3 rounded-md border border-white/10 bg-white/[0.035] px-3 py-3 transition hover:border-primary/45 hover:bg-white/[0.06]"
-                >
-                  <span className="text-xs font-semibold text-primary">#{index + 1}</span>
-                  <span className="min-w-0">
-                    <span className="block truncate text-sm font-medium text-white">
-                      {app.name}
-                    </span>
-                    <span className="block text-xs text-muted-foreground">{app.category}</span>
-                  </span>
-                  <span
-                    className={cn(
-                      "metric-tabular text-sm font-semibold",
-                      growthToneClass(app.metrics.growth24h)
-                    )}
-                    title={app.metrics.growth24h === null ? "No verified previous-day growth baseline." : undefined}
-                  >
-                    {growthLabel(app.metrics.growth24h)}
-                  </span>
+      <section className="border-b border-white/10 bg-white/[0.015]">
+        <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8 lg:py-10">
+          <p className="text-xs font-medium uppercase text-blue-200">Base ecosystem intelligence</p>
+          <h1 className="mt-2 text-3xl font-semibold text-white sm:text-4xl">Base Radar</h1>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground sm:text-base">
+            Discover measured traction across Base apps and emerging coins. Sources, coverage and measurement times stay visible.
+          </p>
+          <nav aria-label="Explore Base Radar" className="mt-5 flex flex-wrap items-center gap-2">
+            <Link href="#trending" className={cn(buttonVariants({ size: "lg" }), "gap-2")}>
+              <RadarIcon className="h-4 w-4" /> App Radar
+            </Link>
+            <Link href="/coins" className={cn(buttonVariants({ variant: "secondary", size: "lg" }), "gap-2")}>
+              <Coins className="h-4 w-4" /> Coin Radar
+            </Link>
+            <Link href="/coins?cohort=new-launches" className="inline-flex h-11 items-center gap-1 px-2 text-sm font-medium text-blue-100 hover:text-white">
+              New pools <ArrowRight className="h-4 w-4" />
+            </Link>
+            <Link href="/submit" className="inline-flex h-11 items-center gap-1 px-2 text-sm font-medium text-muted-foreground hover:text-white">
+              Submit an app <ArrowRight className="h-4 w-4" />
+            </Link>
+          </nav>
+          <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-white/10 pt-4 text-sm">
+            {featuredApp && featuredEconomic?.showNumeric ? (
+              <>
+                <Link href={`/apps/${featuredApp.slug}`} className="font-medium text-white hover:text-blue-100">
+                  {featuredApp.name}: {featuredEconomic.label} {formatCurrency(featuredEconomic.value)}
                 </Link>
-              ))}
-            </div>
+                <span className="text-xs text-muted-foreground">
+                  {originLabel(featuredApp.metrics.metricOrigin ?? featuredApp.metrics.source)} · measured {relativeTime(featuredApp.metrics.measuredAt)} · {featuredApp.metrics.confidence} confidence
+                </span>
+              </>
+            ) : (
+              <span className="text-muted-foreground">No recent app activity with sufficient confidence is available yet.</span>
+            )}
           </div>
+          <DataFreshness
+            lastUpdated={globalLastUpdated}
+            isStale={isDataStale}
+            staleAfterMinutes={staleAfterMinutes}
+            className="mt-3"
+          />
         </div>
       </section>
 
-      <section className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+      <section className="mx-auto hidden max-w-7xl px-4 py-8 sm:px-6 lg:block lg:px-8">
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <StatCard
             label="Total tracked apps"
@@ -487,31 +440,30 @@ export function DashboardClient({
             onAction={resetFilters}
           />
         ) : (
-          <TrendingApps apps={visibleApps} rankById={globalRankById} />
+          <div className="hidden md:block">
+            <TrendingApps apps={visibleApps} rankById={globalRankById} />
+          </div>
         )}
-      </section>
-
-      <SocialTrends trends={socialTrends} unavailable={apps.some((app) => !getSocialDisplayState(app.metrics).showNumeric)} />
-
-      <TokenTrends radar={tokenRadar} />
-
-      <section className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
-        <div className="mb-5 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
-          <div>
-            <h2 className="text-2xl font-semibold tracking-normal text-white">
-              App Rankings
-            </h2>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Live leaderboard for Base apps, builders, agents, and product surfaces.
+        <div className="mt-8 border-t border-white/10 pt-6">
+          <div className="mb-5 flex flex-wrap items-end justify-between gap-2">
+            <div>
+              <h3 className="text-lg font-semibold text-white">Full app rankings</h3>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Source-aware metrics for every tracked app.
+              </p>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              Showing <span className="text-white">{visibleApps.length}</span> of{" "}
+              <span className="text-white">{rankedApps.length}</span>
             </p>
           </div>
-          <p className="text-sm text-muted-foreground">
-            Showing <span className="text-white">{visibleApps.length}</span> of{" "}
-            <span className="text-white">{rankedApps.length}</span>
-          </p>
+          <AppTable key={`${radarView}:${sortMode}`} apps={visibleApps} rankById={globalRankById} />
         </div>
-        <AppTable apps={visibleApps} rankById={globalRankById} />
       </section>
+
+      <CoinRadarPreview radar={tokenRadar} />
+
+      <SocialTrends trends={socialTrends} unavailable={apps.some((app) => !getSocialDisplayState(app.metrics).showNumeric)} />
 
       <section className="border-y border-white/10 bg-white/[0.02]">
         <div className="mx-auto grid max-w-7xl gap-4 px-4 py-10 sm:px-6 md:grid-cols-2 lg:grid-cols-4 lg:px-8">
