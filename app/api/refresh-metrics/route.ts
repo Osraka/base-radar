@@ -29,7 +29,7 @@ import {
   FAST_REFRESH_INTERVAL_MS,
   selectRotatingBatch
 } from "@/lib/refreshBatch";
-import { calculateGrowth, calculateTrendScore } from "@/lib/scoring";
+import { calculateTrendScore } from "@/lib/scoring";
 import {
   isValidEthereumAddress,
   securityHeaders
@@ -51,14 +51,6 @@ interface ApprovedAppRow {
   builder_code: string | null;
   contract_addresses: string[] | null;
   created_at: string;
-}
-
-interface MetricSnapshotRow {
-  app_id: string;
-  tx_24h: number | string | null;
-  tx_7d: number | string | null;
-  unique_users_24h: number | string | null;
-  unique_users_7d: number | string | null;
 }
 
 const INDEXER_APP_DELAY_MS = 150;
@@ -263,27 +255,20 @@ async function failRefreshRun(input: {
 
 function createMetricRow(
   app: ApprovedAppRow,
-  previousMetric: MetricSnapshotRow | undefined,
   activity: Awaited<ReturnType<typeof getRecentContractActivity>>,
   socialMetrics: SocialMetrics,
   measuredAt: string
 ) {
-  const tx24h = activity.txCount;
-  const tx7d = tx24h;
-  const users24h = activity.uniqueUsers;
-  const users7d = users24h;
-  const growth24h = calculateGrowth(tx24h, previousMetric?.tx_24h);
-  const growth7d = calculateGrowth(tx7d, previousMetric?.tx_7d);
   const metric = {
     appId: app.id,
-    tx24h,
-    tx7d,
-    users24h,
-    users7d,
+    tx24h: 0,
+    tx7d: 0,
+    users24h: 0,
+    users7d: 0,
     volume24h: 0,
     volume7d: 0,
-    growth24h,
-    growth7d,
+    growth24h: null,
+    growth7d: null,
     socialMentions24h: socialMetrics.mentions7d,
     socialMentions7d: socialMetrics.mentions7d,
     measuredAt
@@ -309,14 +294,18 @@ function createMetricRow(
     trend_score: calculateTrendScore(metric, app.created_at),
     source: "base_rpc",
     confidence: "low",
-    notes: withSocialNote(BASE_RPC_METRIC_NOTES, socialMetrics),
+    metric_origin: "contract_log_sample",
+    coverage: "experimental",
+    notes: withSocialNote(
+      `${BASE_RPC_METRIC_NOTES} Sample: ${activity.txCount} distinct transaction hashes and ${activity.logCount} logs over blocks ${activity.fromBlock}-${activity.toBlock}.`,
+      socialMetrics
+    ),
     measured_at: measuredAt
   };
 }
 
 function createBuilderCodeMetricRow(
   app: ApprovedAppRow,
-  previousMetric: MetricSnapshotRow | undefined,
   bridgeMetrics: Awaited<ReturnType<typeof calculateBuilderCodeMetricsForApp>>,
   socialMetrics: SocialMetrics,
   measuredAt: string
@@ -331,8 +320,8 @@ function createBuilderCodeMetricRow(
     users7d: users24h,
     volume24h: 0,
     volume7d: 0,
-    growth24h: calculateGrowth(tx24h, previousMetric?.tx_24h),
-    growth7d: calculateGrowth(tx24h, previousMetric?.tx_7d),
+    growth24h: null,
+    growth7d: null,
     socialMentions24h: socialMetrics.mentions7d,
     socialMentions7d: socialMetrics.mentions7d,
     measuredAt
@@ -365,7 +354,6 @@ function createBuilderCodeMetricRow(
 
 function createProtocolAdapterMetricRow(
   app: ApprovedAppRow,
-  previousMetric: MetricSnapshotRow | undefined,
   adapterMetrics: AdapterMetrics,
   socialMetrics: SocialMetrics,
   measuredAt: string
@@ -385,8 +373,8 @@ function createProtocolAdapterMetricRow(
     fees24hUsd: adapterMetrics.fees24hUsd ?? 0,
     revenue24hUsd: adapterMetrics.revenue24hUsd ?? 0,
     volume7d: 0,
-    growth24h: calculateGrowth(tx24h, previousMetric?.tx_24h),
-    growth7d: calculateGrowth(tx7d, previousMetric?.tx_7d),
+    growth24h: null,
+    growth7d: null,
     socialMentions24h: socialMetrics.mentions7d,
     socialMentions7d: socialMetrics.mentions7d,
     tvlUsd: adapterMetrics.tvlUsd ?? 0,
@@ -496,33 +484,6 @@ async function persistBuilderCodeAttributions(input: {
   // attribution counts can back a separate builder_codes metric row or replace
   // low-confidence contract-log estimates for apps with matching builder_code.
   return { detected: rows.length, matchedAppBuilderCode };
-}
-
-async function getLatestMetricsByAppId(appIds: string[]) {
-  const latestMetrics = new Map<string, MetricSnapshotRow>();
-
-  if (appIds.length === 0) {
-    return latestMetrics;
-  }
-
-  const supabase = createSupabaseAdminClient();
-  const { data, error } = await supabase
-    .from("app_metrics")
-    .select("app_id, tx_24h, tx_7d, unique_users_24h, unique_users_7d, measured_at")
-    .in("app_id", appIds)
-    .order("measured_at", { ascending: false });
-
-  if (error) {
-    throw new Error("Unable to fetch latest metric snapshots.");
-  }
-
-  for (const row of (data ?? []) as MetricSnapshotRow[]) {
-    if (!latestMetrics.has(row.app_id)) {
-      latestMetrics.set(row.app_id, row);
-    }
-  }
-
-  return latestMetrics;
 }
 
 async function handleRefresh(request: Request) {
@@ -671,10 +632,6 @@ async function handleRefresh(request: Request) {
           batchNow
         )
       : adapterOnlyCandidates.slice(0, maxApps);
-    const latestMetrics = await getLatestMetricsByAppId(
-      (fastMode ? [...approvedApps, ...adapterOnlyApps] : sanitizedApprovedApps)
-        .map((app) => app.id)
-    );
     const latestBlock = await getBasePublicClient().getBlockNumber();
     const fromBlock =
       latestBlock > BigInt(blockRange - 1) ? latestBlock - BigInt(blockRange - 1) : 0n;
@@ -709,44 +666,59 @@ async function handleRefresh(request: Request) {
           }),
           INDEXER_APP_TIMEOUT_MS
         );
-        const [activity, socialMetrics] = await Promise.all([
+        const [activityResult, socialResult] = await Promise.allSettled([
           activityPromise,
           socialPromise
         ]);
-        const metricRow = createMetricRow(
-          app,
-          latestMetrics.get(app.id),
-          activity,
-          socialMetrics,
-          measuredAt
-        );
-        const { error: metricError } = await supabase
-          .from("app_metrics")
-          .insert(metricRow);
+        if (socialResult.status === "rejected") {
+          throw socialResult.reason;
+        }
+        const socialMetrics = socialResult.value;
 
-        if (metricError) {
-          throw new Error("Metric insert failed.");
+        if (activityResult.status === "fulfilled") {
+          try {
+            const metricRow = createMetricRow(
+              app,
+              activityResult.value,
+              socialMetrics,
+              measuredAt
+            );
+            const { error: metricError } = await supabase
+              .from("app_metrics")
+              .insert(metricRow);
+
+            if (metricError) {
+              throw new Error("MetricInsertFailed");
+            }
+
+            refreshed += 1;
+
+            const attributionSummary = await persistBuilderCodeAttributions({
+              app,
+              transactionHashes: activityResult.value.transactionHashes,
+              supabase
+            });
+            builderCodeAttributions += attributionSummary.detected;
+            builderCodeMatches += attributionSummary.matchedAppBuilderCode;
+          } catch (error) {
+            failed += 1;
+            console.warn("[base-indexer] sample persistence failed", {
+              slug: app.slug,
+              error: error instanceof Error ? error.name : "UnknownIndexerError"
+            });
+          }
+        } else {
+          failed += 1;
+          console.warn("[base-indexer] contract sample unavailable", {
+            slug: app.slug,
+            error: activityResult.reason instanceof Error
+              ? activityResult.reason.name
+              : "UnknownIndexerError"
+          });
         }
 
-        refreshed += 1;
-
-        const attributionSummary = await persistBuilderCodeAttributions({
-          app,
-          transactionHashes: activity.transactionHashes,
-          supabase
-        });
-        builderCodeAttributions += attributionSummary.detected;
-        builderCodeMatches += attributionSummary.matchedAppBuilderCode;
-
-        const adapter = getProtocolAdapter(app.slug, {
-          getBaseRpcMetrics: async () => {
-            const adapterActivity = await activityPromise;
-            return {
-              tx24h: adapterActivity.txCount,
-              users24h: adapterActivity.uniqueUsers
-            };
-          }
-        });
+        // A short contract-log sample cannot supply an adapter's 24h TX or wallet fields.
+        const adapter = getProtocolAdapter(app.slug);
 
         if (adapter) {
           try {
@@ -755,7 +727,6 @@ async function handleRefresh(request: Request) {
             if (isMetricReliable(adapterMetrics)) {
               const adapterMetricRow = createProtocolAdapterMetricRow(
                 app,
-                latestMetrics.get(app.id),
                 adapterMetrics,
                 socialMetrics,
                 measuredAt
@@ -824,7 +795,6 @@ async function handleRefresh(request: Request) {
 
         const adapterMetricRow = createProtocolAdapterMetricRow(
           app,
-          latestMetrics.get(app.id),
           adapterMetrics,
           socialMetrics,
           measuredAt
@@ -874,7 +844,6 @@ async function handleRefresh(request: Request) {
 
         const builderMetricRow = createBuilderCodeMetricRow(
           app,
-          latestMetrics.get(app.id),
           bridgeMetrics,
           await getSocialMetricsForApp({
             slug: app.slug,

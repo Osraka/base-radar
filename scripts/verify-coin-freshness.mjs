@@ -36,6 +36,7 @@ function loadTs(relativePath) {
 const { isCoinMetricStale, coinFreshnessFactor, compareCoinMetricFreshness } =
   loadTs("lib/coins/freshness.ts");
 const { calculateCoinTrendScore } = loadTs("lib/scoring/coins.ts");
+const { classifyCoinCohort, parseCoinCohort } = loadTs("lib/coins/cohorts.ts");
 const now = Date.now();
 const recent = new Date(now - 5 * 60_000).toISOString();
 const stale = new Date(now - 30 * 60_000).toISOString();
@@ -75,4 +76,47 @@ assert(staleScore.score > expiredScore.score);
 assert.equal(expiredScore.score, 0);
 assert.equal(expiredScore.scoreBreakdown.freshness, 0);
 
-process.stdout.write("Coin freshness: 12 assertions passed.\n");
+const poolAddress = `0x${"b".repeat(40)}`;
+const poolCoin = {
+  ...coin,
+  pairAddress: poolAddress,
+  buys24h: 50,
+  sells24h: 40,
+  priceChange1h: 8,
+  txns24h: 80,
+  riskFlags: []
+};
+const day = 86_400_000;
+const newPool = { ...poolCoin, pairCreatedAt: new Date(now - 60_000).toISOString() };
+
+assert.equal(classifyCoinCohort(newPool, now), "new-launches");
+assert.equal(classifyCoinCohort({ ...newPool, pairAddress: null }, now), null);
+assert.equal(classifyCoinCohort({ ...newPool, pairAddress: "not-an-address" }, now), null);
+assert.equal(classifyCoinCohort({ ...newPool, pairCreatedAt: null }, now), null);
+assert.equal(classifyCoinCohort({ ...newPool, measuredAt: stale }, now), null);
+assert.equal(classifyCoinCohort({ ...newPool, pairCreatedAt: new Date(now + day).toISOString() }, now), null);
+assert.equal(classifyCoinCohort({
+  ...poolCoin,
+  firstSeenAt: recent,
+  pairCreatedAt: new Date(now - 180 * day).toISOString()
+}, now), "established-leaders", "A recently discovered cbBTC-like asset is not a new launch.");
+assert.equal(classifyCoinCohort({
+  ...poolCoin,
+  pairCreatedAt: new Date(now - 3 * day).toISOString(),
+  volume1h: 50_000
+}, now), "early-momentum");
+assert.equal(classifyCoinCohort({
+  ...poolCoin,
+  pairCreatedAt: new Date(now - 20 * day).toISOString(),
+  priceChange1h: 120
+}, now), "unusual-activity");
+assert.equal(classifyCoinCohort({
+  ...poolCoin,
+  pairCreatedAt: new Date(now - 3 * day).toISOString(),
+  volume1h: 50_000,
+  riskFlags: ["possible_honeypot"]
+}, now), null, "A flagged early token should not enter Early Momentum.");
+assert.equal(parseCoinCohort("new-launches"), "new-launches");
+assert.equal(parseCoinCohort("unexpected"), null);
+
+process.stdout.write("Coin freshness and discovery cohort assertions passed.\n");

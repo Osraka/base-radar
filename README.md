@@ -335,17 +335,17 @@ Metric priority:
 
 1. Protocol adapter metrics
 2. Builder Code attribution metrics
-3. Base RPC contract-log estimates
+3. Base RPC contract-log samples (not daily TX or wallet totals)
 4. Mock/placeholder metrics
 
 Current protocol adapters:
 
-- `uniswap-base`: DefiLlama Base DEX volume and TVL, plus a dedicated 24h Base RPC router-log activity sample from the verified Base Uniswap router. TX/wallet fields are `N/A` if that RPC sample fails.
-- `aerodrome`: DefiLlama Base DEX volume and the sum of Base TVL from Aerodrome V1 and Slipstream, plus Base RPC contract-log activity estimates.
-- `zora`: Base RPC activity estimates first; DefiLlama Zora Coins DEX volume when available.
-- `aave-base`: DefiLlama Base TVL/fees, plus Base RPC contract-log activity estimates.
-- `moonwell`: DefiLlama Base TVL/fees, plus Base RPC contract-log activity estimates.
-- `compound-v3-base`, `morpho-base`, `fluid-base`, `euler-base`, `yearn-base`, `extra-finance`, `seamless-protocol`, `reserve-protocol`, and `beefy-base`: DefiLlama Base TVL/fees coverage where available; Base RPC activity is only used when verified contracts are configured.
+- `uniswap-base`: DefiLlama Base DEX volume and TVL, plus an approximate 24h **V3 SwapRouter02 subset** counted by distinct transaction hash. Swap recipients are not claimed as unique users. If RPC fails, the subset is unavailable.
+- `aerodrome`: DefiLlama Base DEX volume and the sum of Base TVL from Aerodrome V1 and Slipstream. Bounded contract-log scans are diagnostic only, not 24h TX/wallet totals.
+- `zora`: DefiLlama Zora Coins DEX volume when Base-specific coverage is available; generic contract logs do not establish Zora app usage.
+- `aave-base`: DefiLlama Base TVL/fees; generic Pool/provider log samples do not establish daily users or transactions.
+- `moonwell`: DefiLlama Base TVL/fees; the selected market contracts cover only part of Moonwell and do not establish daily users or transactions.
+- `compound-v3-base`, `morpho-base`, `fluid-base`, `euler-base`, `yearn-base`, `extra-finance`, `seamless-protocol`, `reserve-protocol`, and `beefy-base`: DefiLlama Base TVL/fees coverage where available; bounded Base RPC scans are not promoted to daily activity metrics.
 - `pancakeswap-base`, `curve-base`, `pendle-base`, `balancer-base`, `quickswap-base`, `sushiswap-base`, and `superfluid-base`: DefiLlama Base overview rows for DEX/payment-style volume where available; no contract activity is fabricated when contracts are not verified.
 - `across-protocol-base`, `stargate-base`, `layerzero-base`, `hyperlane-base`, `axelar-base`, and `spark-base`: DefiLlama Base-specific TVL/fees coverage where available; coverage may remain limited if public Base-specific metrics are not exposed. Across uses Base bridge fees, not Ethereum TVL.
 - `rodeo-finance`: no active adapter until a Base-specific source is verified; old mock rows do not count as fresh measurements.
@@ -362,18 +362,19 @@ DefiLlama integration:
 
 Confidence levels:
 
-- `high`: verified contracts plus reliable external metrics, usually DefiLlama + Base RPC estimates.
+- `high`: reliable, source-appropriate metrics with substantial verified coverage.
 - `medium`: official contracts or partial hybrid metrics.
 - `low`: heuristic Base RPC only or unavailable/placeholder coverage.
 
 Coverage levels:
 
-- `high`: volume/TVL and activity coverage are both available.
-- `medium`: only external economic metrics or activity estimates are available.
+- `high`: multiple source-appropriate metrics with substantial coverage.
+- `medium`: only external economic metrics or a documented activity subset are available.
 - `limited`: app is real, but reliable metric coverage is incomplete.
 - `experimental`: reserved for future sources that need validation.
 
-Exact daily active users cannot always be measured from generic contract logs.
+The five-app contract/event audit is in [App activity coverage](docs/app-activity-coverage.md).
+Exact daily active users cannot be measured from generic contract logs.
 Some contracts emit events with indexed user addresses, some do not, and app
 activity may route through aggregators, routers, wallets, relayers, or shared
 infrastructure. When exact DAU is unavailable, the product should show coverage
@@ -678,10 +679,23 @@ The `/coins` page supports server-rendered list expansion:
 - `/coins?limit=100`
 - `/coins?limit=300`
 - `/coins?sort=newest&limit=300`
-- `/coins?new=true&sort=newest&limit=300`
+- `/coins?cohort=new-launches&sort=newest&limit=300`
+- `/coins?cohort=early-momentum`
+- `/coins?cohort=established-leaders`
+- `/coins?cohort=unusual-activity`
 
-The UI exposes Top 100, Top 300, Newest, and Load more controls without mixing
-coin rankings into app rankings.
+`/coins?new=true` remains a legacy alias for New Launches. A coin enters that
+view only if its pair address and reported pair-creation time place it within
+the last 24 hours and its market snapshot is fresh. `firstSeenAt` is not used as
+pool age: a newly discovered old asset such as cbBTC is not a new launch.
+Early Momentum requires a 1-7 day pool, liquidity, trades and volume. Established
+Leaders require a pool at least seven days old, stronger liquidity/volume and
+medium-or-better confidence. Unusual Activity surfaces extreme movement or
+turnover separately, including risky assets. Coins without adequate evidence
+remain in All coins. Cohorts are mutually exclusive; they do not verify token
+safety. "No major flags" is an incomplete automated screen, not a guarantee
+that a token can be sold. The UI exposes Top 100, Top 300, Newest, and Load more
+without mixing coin rankings into app rankings.
 
 Verify token radar:
 
@@ -814,8 +828,8 @@ What it does:
 - Uses a server-only viem Base public client from `BASE_RPC_URL`.
 - Reads recent logs for each approved app contract.
 - Scans only a small bounded block range.
-- Counts logs, unique transaction hashes, and indexed wallet-looking addresses from event topics.
-- Inserts a new `app_metrics` row per refreshed app with `source = base_rpc`, `confidence = low`, and estimation notes.
+- Counts logs and distinct transaction hashes as a bounded diagnostic sample. Indexed event topics are not counted as users.
+- Inserts a metadata row with `source = base_rpc`, `confidence = low`, `coverage = experimental`, and the observed block range in notes. Daily TX/wallet fields are withheld.
 - Recalculates trend score with the existing ranking formula.
 
 Server-only environment variables:
@@ -832,7 +846,7 @@ Safety limits:
 - Hard max scan range: 2,000 blocks.
 - Default app limit per run: 20 approved apps.
 - Apps with invalid contract addresses or too many contract addresses are skipped.
-- Per-app log counts are clamped to avoid runaway metric spikes.
+- Scans exceeding the per-app log budget fail rather than silently truncating a partial count.
 - Each app refresh has a timeout and failures are isolated.
 - One app failure is isolated; the refresh continues for other apps.
 - RPC/internal errors are logged server-side with safe summaries only.
@@ -859,13 +873,12 @@ npm run verify:base-indexer
 
 Limitations:
 
-- Base RPC rows are explicitly marked as `source = base_rpc`, `confidence = low`, with notes saying they are estimated from recent logs over a limited block range.
+- Base RPC rows are explicitly marked as `source = base_rpc`, `confidence = low`, `coverage = experimental`, with a block-range sample in notes.
 - API responses include metric `source`, `confidence`, and `notes` so the UI can label estimated metrics in a later polish pass.
-- `tx_24h` and `unique_users_24h` are conservative estimates from the scanned recent block window, not a full 24-hour index yet.
-- `tx_7d` and `unique_users_7d` currently mirror the scanned window until historical backfill exists.
+- A 1,000-block scan is not a 24h or 7d index. Its counts are not written to `tx_24h`, `tx_7d`, `unique_users_24h`, or `unique_users_7d`; the sample remains in the row notes.
+- Historical rows from earlier releases may contain short-window counts in daily fields. The display layer suppresses numeric TX/wallet values from those generic RPC sources.
 - `volume_24h`, `volume_7d`, and `social_mentions_24h` are set to `0` in this phase.
-- Builder Codes / ERC-8021 are intentionally not parsed yet. Contract-based activity is the first safe indexing layer; attribution parsing comes after this is stable.
-- Farcaster/Neynar mention tracking, historical charts, and generated share images are later phases.
+- Builder Code attribution is separate from this generic contract-log sample.
 
 ## Builder Codes / ERC-8021 MVP
 

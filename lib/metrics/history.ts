@@ -1,14 +1,51 @@
+import { APP_METRIC_STALE_AFTER_MINUTES } from "@/lib/constants";
 import {
   shouldShowNumericTxs,
   shouldShowNumericUsers
 } from "@/lib/metrics/reliability";
 import type { AppMetrics, AppWithMetrics } from "@/lib/types";
+import { calculateGrowth } from "@/lib/scoring";
 
 export type HistoryMetricKey = "tx" | "wallets" | "volume" | "tvl" | "fees";
 
 export interface HistoryPoint {
   measuredAt: string;
   value: number;
+}
+
+export function calculateWindowChange(
+  points: HistoryPoint[],
+  hours: number,
+  asOf: number
+): number | null {
+  if (points.length < 2 || !Number.isFinite(asOf) || hours <= 0) {
+    return null;
+  }
+
+  const first = points[0];
+  const last = points.at(-1)!;
+  const firstTime = new Date(first.measuredAt).getTime();
+  const lastTime = new Date(last.measuredAt).getTime();
+  const windowMs = hours * 3_600_000;
+  const toleranceMs = Math.min(windowMs * 0.1, 6 * 3_600_000);
+  const windowStart = asOf - windowMs;
+  const latestAllowedAgeMs = APP_METRIC_STALE_AFTER_MINUTES * 60_000;
+
+  if (
+    !Number.isFinite(first.value) ||
+    !Number.isFinite(last.value) ||
+    !Number.isFinite(firstTime) ||
+    !Number.isFinite(lastTime) ||
+    firstTime < windowStart ||
+    firstTime > windowStart + toleranceMs ||
+    lastTime < asOf - Math.min(toleranceMs, latestAllowedAgeMs) ||
+    lastTime > asOf + 60_000
+  ) {
+    return null;
+  }
+
+  const growth = calculateGrowth(last.value, first.value);
+  return growth === null ? null : Number(growth.toFixed(1));
 }
 
 function metricValue(metric: AppMetrics, key: HistoryMetricKey) {
@@ -81,4 +118,18 @@ export function getComparableHistoryPoints(
   return [...points.entries()]
     .sort(([left], [right]) => left - right)
     .map(([, point]) => point);
+}
+
+export function getComparableGrowth(
+  history: AppMetrics[],
+  app: AppWithMetrics,
+  key: HistoryMetricKey,
+  hours: number,
+  now: number
+): number | null {
+  return calculateWindowChange(
+    getComparableHistoryPoints(history, app, key, hours, now),
+    hours,
+    now
+  );
 }

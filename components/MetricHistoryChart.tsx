@@ -3,7 +3,11 @@
 import { useMemo, useState } from "react";
 import { Activity, BarChart3, DollarSign, Users, WalletCards } from "lucide-react";
 import { EmptyState } from "@/components/EmptyState";
-import { getComparableHistoryPoints } from "@/lib/metrics/history";
+import {
+  calculateWindowChange,
+  getComparableHistoryPoints,
+  type HistoryPoint
+} from "@/lib/metrics/history";
 import type { AppMetrics, AppWithMetrics } from "@/lib/types";
 import { cn, formatCompact, formatCurrency } from "@/lib/utils";
 
@@ -59,21 +63,23 @@ const seriesConfig = [
   }
 ] as const;
 
-function makePath(values: number[]) {
-  if (values.length < 2) {
+function makePath(points: HistoryPoint[], from: number, to: number) {
+  if (points.length < 2 || to <= from) {
     return "";
   }
 
   const width = 280;
   const height = 72;
+  const values = points.map((point) => point.value);
   const max = Math.max(...values);
   const min = Math.min(...values);
   const span = Math.max(1, max - min);
 
-  return values
-    .map((value, index) => {
-      const x = (index / (values.length - 1)) * width;
-      const y = height - ((value - min) / span) * height;
+  return points
+    .map((point, index) => {
+      const measuredAt = new Date(point.measuredAt).getTime();
+      const x = (Math.max(from, Math.min(measuredAt, to)) - from) / (to - from) * width;
+      const y = height - ((point.value - min) / span) * height;
       return `${index === 0 ? "M" : "L"} ${x.toFixed(1)} ${y.toFixed(1)}`;
     })
     .join(" ");
@@ -81,14 +87,14 @@ function makePath(values: number[]) {
 
 export function MetricHistoryChart({ app, history, asOf }: MetricHistoryChartProps) {
   const [range, setRange] = useState<RangeKey>("7d");
+  const selectedRange = ranges.find((item) => item.key === range) ?? ranges[1];
+  const now = new Date(asOf).getTime();
   const series = useMemo(() => {
-    const selectedRange = ranges.find((item) => item.key === range) ?? ranges[1];
-    const now = new Date(asOf).getTime();
     return seriesConfig.map((config) => ({
       ...config,
       points: getComparableHistoryPoints(history, app, config.key, selectedRange.hours, now)
     }));
-  }, [app, asOf, history, range]);
+  }, [app, history, now, selectedRange.hours]);
   const availableSeries = series.filter((item) => item.points.length >= 2);
   const missingSeries = series.filter((item) => item.points.length < 2);
 
@@ -130,9 +136,8 @@ export function MetricHistoryChart({ app, history, asOf }: MetricHistoryChartPro
           {availableSeries.map((series) => {
             const values = series.points.map((point) => point.value);
             const latest = values.at(-1)!;
-            const first = values[0];
-            const delta = ((latest - first) / first) * 100;
-            const path = makePath(values);
+            const delta = calculateWindowChange(series.points, selectedRange.hours, now);
+            const path = makePath(series.points, now - selectedRange.hours * 3_600_000, now);
             const Icon = series.icon;
 
             return (
@@ -147,19 +152,28 @@ export function MetricHistoryChart({ app, history, asOf }: MetricHistoryChartPro
                       {series.format(latest)}
                     </p>
                   </div>
-                  <span
-                    className={cn(
-                      "metric-tabular rounded-md px-2 py-1 text-xs",
-                      delta > 0
-                        ? "bg-emerald-400/10 text-emerald-200"
-                        : delta < 0
-                          ? "bg-rose-400/10 text-rose-200"
-                          : "bg-white/[0.06] text-muted-foreground"
-                    )}
-                  >
-                    {delta > 0 ? "+" : ""}
-                    {delta.toFixed(Math.abs(delta) >= 100 ? 0 : 1)}%
-                  </span>
+                  {delta === null ? (
+                    <span
+                      className="rounded-md bg-white/[0.06] px-2 py-1 text-xs text-muted-foreground"
+                      title="No comparable observation near the start and end of this period."
+                    >
+                      Partial window
+                    </span>
+                  ) : (
+                    <span
+                      className={cn(
+                        "metric-tabular rounded-md px-2 py-1 text-xs",
+                        delta > 0
+                          ? "bg-emerald-400/10 text-emerald-200"
+                          : delta < 0
+                            ? "bg-rose-400/10 text-rose-200"
+                            : "bg-white/[0.06] text-muted-foreground"
+                      )}
+                    >
+                      {delta > 0 ? "+" : ""}
+                      {delta.toFixed(Math.abs(delta) >= 100 ? 0 : 1)}%
+                    </span>
+                  )}
                 </div>
                 <svg
                   viewBox="0 0 280 78"

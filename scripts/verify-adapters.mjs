@@ -277,10 +277,10 @@ await check("Uniswap no longer returns obvious zero metrics", async () => {
   const metrics = await adapter.getMetrics();
   assertAdapterShape(metrics);
   assert((metrics.volume24hUsd ?? 0) > 0, "Uniswap volume is zero.");
-  assert(metrics.tx24h === 420, "Uniswap tx count should use router logs.");
-  assert(metrics.users24h === 180, "Uniswap users should use unique router transaction senders.");
+  assert(metrics.tx24h === 420, "Uniswap tx count should use distinct V3 router transaction hashes.");
+  assert(metrics.users24h === undefined, "Swap recipients cannot be treated as users.");
   assert(metrics.confidence === "medium", "Uniswap router activity confidence should be medium.");
-  assert(metrics.source.includes("Base RPC Swap events"), "Uniswap source should mention Base RPC Swap events.");
+  assert(metrics.source.includes("V3 router tx hashes"), "Uniswap source should describe the tracked subset.");
   return `volume=${Math.round(metrics.volume24hUsd)}, tx=${metrics.tx24h}, users=${metrics.users24h}.`;
 });
 

@@ -4,6 +4,9 @@ import {
   USE_MOCK_DATA
 } from "@/lib/constants";
 import { mockApps, mockMetrics } from "@/lib/mockData";
+import {
+  getComparableGrowth
+} from "@/lib/metrics/history";
 import { rankAppSnapshot } from "@/lib/ranking/apps";
 import { calculateTrendScore } from "@/lib/scoring";
 import { isValidEthereumAddress, safeParseUrl, sanitizeText } from "@/lib/security";
@@ -111,15 +114,6 @@ function combineAppsAndMetrics(apps: BaseApp[], metrics: AppMetrics[]): AppWithM
 function toNumber(value: number | string | null | undefined) {
   const parsedValue = Number(value ?? 0);
   return Number.isFinite(parsedValue) ? parsedValue : 0;
-}
-
-function toNullableNumber(value: number | string | null | undefined) {
-  if (value === null || value === undefined || value === "") {
-    return null;
-  }
-
-  const parsedValue = Number(value);
-  return Number.isFinite(parsedValue) ? parsedValue : null;
 }
 
 function toMetricSource(value: string | null | undefined): MetricSource {
@@ -300,8 +294,9 @@ function toAppMetric(row: SupabaseMetricRow): AppMetrics {
       ? volume24hUsd
       : toNumber(row.volume_24h),
     volume7d: toNumber(row.volume_7d),
-    growth24h: toNullableNumber(row.growth_24h),
-    growth7d: toNullableNumber(row.growth_7d),
+    // Older rows compared adjacent refreshes, not equivalent prior-day windows.
+    growth24h: null,
+    growth7d: null,
     socialMentions24h: socialMentions7d,
     socialMentions7d,
     socialEngagement24h: toNumber(row.social_engagement_24h),
@@ -379,7 +374,21 @@ async function getAppsFromSupabase(): Promise<AppWithMetrics[]> {
       createEmptyMetric(app.id, app.updatedAt)
     );
 
-    return combineAppsAndMetrics(apps, metrics);
+    const now = Date.now();
+    return combineAppsAndMetrics(apps, metrics).map((app) => {
+      const history = metricsByAppId.get(app.id) ?? [];
+      const growth24h = getComparableGrowth(history, app, "tx", 24, now);
+      const growth7d = getComparableGrowth(history, app, "tx", 24 * 7, now);
+      const updatedMetrics = { ...app.metrics, growth24h, growth7d };
+
+      return {
+        ...app,
+        metrics: {
+          ...updatedMetrics,
+          trendScore: calculateTrendScore(updatedMetrics, app.createdAt, app)
+        }
+      };
+    });
   } catch {
     return [];
   }

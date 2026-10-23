@@ -77,6 +77,19 @@ function hasHighConfidenceTxSource(metric: AppMetrics) {
   );
 }
 
+function hasUnverifiedRpcActivity(metric: AppMetrics) {
+  const origin = metric.metricOrigin?.toLowerCase() ?? "";
+  return metric.source === "base_rpc" ||
+    (metric.source === "protocol_adapter" &&
+      (origin.includes("base_rpc") || origin.includes("base rpc")));
+}
+
+function hasBoundedRouterTxSource(metric: AppMetrics, app: AppLike) {
+  return app.slug === "uniswap-base" &&
+    metric.source === "protocol_adapter" &&
+    (metric.metricOrigin?.toLowerCase().includes("v3 router tx hashes") ?? false);
+}
+
 export function isUserMetricReliable(metric: AppMetrics, app: AppLike) {
   if (metric.users24h <= 0) {
     return false;
@@ -84,6 +97,10 @@ export function isUserMetricReliable(metric: AppMetrics, app: AppLike) {
 
   if (hasHighConfidenceUserSource(metric)) {
     return true;
+  }
+
+  if (hasUnverifiedRpcActivity(metric)) {
+    return false;
   }
 
   if (
@@ -104,6 +121,10 @@ export function isTxMetricReliable(metric: AppMetrics, app: AppLike) {
 
   if (hasHighConfidenceTxSource(metric)) {
     return true;
+  }
+
+  if (hasUnverifiedRpcActivity(metric) && !hasBoundedRouterTxSource(metric, app)) {
+    return false;
   }
 
   if (
@@ -170,15 +191,19 @@ export function getMetricDisplayState(metric: AppMetrics, app: AppLike) {
           : "No verified wallet activity is tracked for this app yet."
     },
     txs: {
-      label: "24h TXs",
+      label: hasBoundedRouterTxSource(metric, app) ? "Tracked V3 TXs" : "24h TXs",
       showNumeric: showNumericTxs,
       valueWhenHidden: metric.tx24h > 0
         ? "Limited"
         : "No verified contract activity tracked yet",
       caption: showNumericTxs
-        ? "Tracked activity from configured sources."
+        ? hasBoundedRouterTxSource(metric, app)
+          ? "Distinct V3 Swap transaction hashes routed through SwapRouter02 in an approximate 24h block window; not all Uniswap transactions."
+          : "Tracked activity from configured sources."
         : metric.tx24h > 0
-          ? "Only activity from tracked contracts."
+          ? hasUnverifiedRpcActivity(metric)
+            ? "A short contract-log sample cannot establish 24h transactions."
+            : "Only activity from tracked contracts."
           : "No verified contract activity is tracked for this app yet."
     },
     badges: [
@@ -286,12 +311,20 @@ export function userReliabilityWeight(metric: AppMetrics, app?: AppLike) {
     return 1;
   }
 
+  if (hasUnverifiedRpcActivity(metric)) {
+    return 0;
+  }
+
   return isUserMetricReliable(metric, app) ? 1 : 0.2;
 }
 
 export function txReliabilityWeight(metric: AppMetrics, app?: AppLike) {
   if (!app) {
     return 1;
+  }
+
+  if (hasUnverifiedRpcActivity(metric) && !hasBoundedRouterTxSource(metric, app)) {
+    return 0;
   }
 
   return isTxMetricReliable(metric, app) ? 1 : 0.35;

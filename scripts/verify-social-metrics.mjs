@@ -217,6 +217,30 @@ await check("Missing Neynar key fails gracefully", async () => {
   return metrics.notes ?? "fallback ok.";
 });
 
+await check("Neynar search uses the documented endpoint and only x-api-key", async () => {
+  const originalFetch = global.fetch;
+  let captured = null;
+
+  try {
+    global.fetch = async (url, options) => {
+      captured = { url: new URL(url), headers: options.headers };
+      return { ok: false, status: 401 };
+    };
+    const result = await fetchNeynarCastSearchResult('"Moonwell" after:2026-10-16', {
+      apiKey: "test-only",
+      limit: 1
+    });
+
+    assert(captured?.url.pathname === "/v2/farcaster/cast/search", "Search path does not match official docs.");
+    assert(captured?.headers["x-api-key"] === "test-only", "Documented key header is missing.");
+    assert(!("api_key" in captured.headers), "Undocumented duplicate key header is still sent.");
+    assert(result.status === 401 && result.response === null, "401 should remain a safe unavailable result.");
+    return "documented request shape and redacted 401 fallback verified.";
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
 await check("Timeout and bad-key handling never throws", async () => {
   const response = await fetchNeynarCastSearch('"Zora"', {
     apiKey: "invalid-test-key",

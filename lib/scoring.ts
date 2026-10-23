@@ -2,6 +2,8 @@ import { TREND_BENCHMARKS } from "@/lib/constants";
 import {
   economicReliabilityWeight,
   isSocialDataUnavailable,
+  isTxMetricReliable,
+  isUserMetricReliable,
   txReliabilityWeight,
   userReliabilityWeight
 } from "@/lib/metrics/reliability";
@@ -124,15 +126,15 @@ function metricAgeDays(measuredAt: string) {
   return Math.max(0, (Date.now() - measuredTime) / 86_400_000);
 }
 
-function hasRecentInteraction(metrics: TrendInput) {
+function hasRecentInteraction(metrics: TrendInput, app?: Pick<BaseApp, "slug" | "name">) {
   const socialMentions =
     metrics.socialMentions7d ?? metrics.socialMentions24h ?? 0;
+  const reliableTx = !app || isTxMetricReliable(metrics as AppMetrics, app);
+  const reliableUsers = !app || isUserMetricReliable(metrics as AppMetrics, app);
 
   return (
-    (metrics.tx24h ?? 0) > 0 ||
-    (metrics.tx7d ?? 0) > 0 ||
-    metrics.users24h > 0 ||
-    metrics.users7d > 0 ||
+    (reliableTx && ((metrics.tx24h ?? 0) > 0 || (metrics.tx7d ?? 0) > 0)) ||
+    (reliableUsers && (metrics.users24h > 0 || metrics.users7d > 0)) ||
     metrics.volume24h > 0 ||
     (metrics.volume24hUsd ?? 0) > 0 ||
     (metrics.fees24hUsd ?? 0) > 0 ||
@@ -141,11 +143,15 @@ function hasRecentInteraction(metrics: TrendInput) {
   );
 }
 
-function recentInteractionScore(metrics: TrendInput) {
+function recentInteractionScore(metrics: TrendInput, app?: Pick<BaseApp, "slug" | "name">) {
   const socialMentions =
     metrics.socialMentions7d ?? metrics.socialMentions24h ?? 0;
-  const txScore = normalize((metrics.tx7d ?? 0) || (metrics.tx24h ?? 0) * 7, 25_000);
-  const walletScore = normalize(metrics.users7d || metrics.users24h * 7, 8_000);
+  const txScore = !app || isTxMetricReliable(metrics as AppMetrics, app)
+    ? normalize((metrics.tx7d ?? 0) || (metrics.tx24h ?? 0) * 7, 25_000)
+    : 0;
+  const walletScore = !app || isUserMetricReliable(metrics as AppMetrics, app)
+    ? normalize(metrics.users7d || metrics.users24h * 7, 8_000)
+    : 0;
   const economicScore = normalize(
     metrics.volume24h ||
       (metrics.volume24hUsd ?? 0) ||
@@ -163,14 +169,14 @@ function recentInteractionScore(metrics: TrendInput) {
   );
 }
 
-function recentInteractionMultiplier(metrics: TrendInput) {
+function recentInteractionMultiplier(metrics: TrendInput, app?: Pick<BaseApp, "slug" | "name">) {
   const ageDays = metricAgeDays(metrics.measuredAt);
 
   if (ageDays > 7) {
     return 0.55;
   }
 
-  if (hasRecentInteraction(metrics)) {
+  if (hasRecentInteraction(metrics, app)) {
     return 1;
   }
 
@@ -222,7 +228,7 @@ export function calculateTrendScore(
         TREND_BENCHMARKS.maxSocialMentions
       );
   const freshnessScore = calculateFreshnessScore(metrics.measuredAt, createdAt);
-  const interactionScore = recentInteractionScore(metrics);
+  const interactionScore = recentInteractionScore(metrics, app);
 
   const score =
     txGrowthScore * 0.22 +
@@ -235,7 +241,7 @@ export function calculateTrendScore(
 
   return Number(
     clamp(
-      score * confidenceMultiplier(metrics) * recentInteractionMultiplier(metrics)
+      score * confidenceMultiplier(metrics) * recentInteractionMultiplier(metrics, app)
     ).toFixed(1)
   );
 }

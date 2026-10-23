@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { AlertTriangle, ArrowUpRight, Coins, ExternalLink, ShieldCheck } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, CircleHelp, Coins, ExternalLink } from "lucide-react";
 import { DataFreshness } from "@/components/DataFreshness";
 import { Footer } from "@/components/Footer";
 import { Header } from "@/components/Header";
@@ -42,7 +42,7 @@ function baseScanTokenUrl(address: string) {
   return `https://basescan.org/token/${address}`;
 }
 
-function riskTone(flags: string[]) {
+function riskTone(flags: string[], honeypotFlagged: boolean | null) {
   if (flags.includes("possible_honeypot") || flags.includes("liquidity_missing")) {
     return "border-rose-400/30 bg-rose-400/10 text-rose-100";
   }
@@ -51,7 +51,11 @@ function riskTone(flags: string[]) {
     return "border-amber-400/30 bg-amber-400/10 text-amber-100";
   }
 
-  return "border-emerald-400/30 bg-emerald-400/10 text-emerald-100";
+  if (honeypotFlagged === null) {
+    return "border-amber-400/30 bg-amber-400/10 text-amber-100";
+  }
+
+  return "border-white/15 bg-white/[0.05] text-muted-foreground";
 }
 
 export default async function CoinDetailPage({
@@ -91,13 +95,19 @@ export default async function CoinDetailPage({
               </div>
               <Badge className={cn("gap-1", coin.isStale
                 ? "border-amber-400/30 bg-amber-400/10 text-amber-100"
-                : riskTone(coin.riskFlags))}>
+                : riskTone(coin.riskFlags, coin.honeypotFlagged))}>
                 {coin.riskFlags.length ? (
                   <AlertTriangle className="h-3 w-3" />
                 ) : (
-                  <ShieldCheck className="h-3 w-3" />
+                  <CircleHelp className="h-3 w-3" />
                 )}
-                {coin.isStale ? "Safety recheck needed" : coin.riskFlags.length ? "Risk flags" : "Lower risk"}
+                {coin.isStale
+                  ? "Screening stale"
+                  : coin.riskFlags.length
+                    ? "Risk flags"
+                    : coin.honeypotFlagged === null
+                      ? "Trade check unavailable"
+                      : "No flags detected"}
               </Badge>
             </div>
 
@@ -153,8 +163,9 @@ export default async function CoinDetailPage({
             </div>
 
             <div className="mt-6 rounded-lg border border-amber-400/20 bg-amber-400/10 p-4 text-sm leading-6 text-amber-50/85">
-              High risk / newly detected token. Data may be incomplete. Base
-              Radar does not make investment recommendations.
+              Automated risk flags can miss contract restrictions and failed sells.
+              A token with no detected flags is not verified safe or tradeable.
+              Data may be incomplete; Base Radar does not make investment recommendations.
             </div>
           </div>
 

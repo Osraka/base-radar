@@ -274,7 +274,7 @@ export function DashboardClient({
                 { label: "Coins", href: "/coins", icon: Coins },
                 { label: "New Coins", href: "/coins?new=true&sort=newest", icon: Rocket },
                 { label: "Hot Emerging", href: "/coins?sort=volume1h", icon: LineChart },
-                { label: "High Confidence", href: "/coins?verified=true&risk=lower", icon: ShieldCheck }
+                { label: "Verified Metadata", href: "/coins?verified=true&risk=lower", icon: ShieldCheck }
               ].map((item) => {
                 const ItemIcon = item.icon;
 

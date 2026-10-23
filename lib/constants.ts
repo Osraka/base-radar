@@ -56,7 +56,7 @@ export const INDEXER_APP_TIMEOUT_MS = 20_000;
 export const MAX_BUILDER_CODE_TX_SAMPLE_PER_APP = 8;
 
 export const BASE_RPC_METRIC_NOTES =
-  "Estimated from recent contract logs over a limited block range.";
+  "Contract logs cover a limited block sample, not a verified 24h or 7d window. Log topics do not establish unique users; daily TX and wallet fields are withheld.";
 export const BUILDER_CODE_METRIC_NOTES =
   "Attributed from locally registered Builder Code matches. Parser is conservative and not registry-verified externally.";
 export const PROTOCOL_ADAPTER_METRIC_NOTES =

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { parseCoinCohort } from "@/lib/coins/cohorts";
 import {
   RATE_LIMITED_ERROR,
   rateLimitApiRead,
@@ -48,6 +49,7 @@ export async function GET(request: Request) {
       limit,
       sort: toSortMode(searchParams.get("sort")),
       risk: toRiskFilter(searchParams.get("risk")),
+      cohort: parseCoinCohort(searchParams.get("cohort")),
       verifiedOnly: searchParams.get("verifiedOnly") === "true",
       newOnly: searchParams.get("newOnly") === "true"
     });

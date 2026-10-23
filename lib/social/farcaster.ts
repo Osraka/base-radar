@@ -7,7 +7,7 @@ import type {
 } from "@/lib/social/types";
 
 const NEYNAR_API_BASE_URL = "https://api.neynar.com";
-const NEYNAR_SEARCH_PATH = "/v2/farcaster/cast/search/";
+const NEYNAR_SEARCH_PATH = "/v2/farcaster/cast/search";
 const DEFAULT_NEYNAR_TIMEOUT_MS = 5_000;
 const DEFAULT_NEYNAR_CACHE_TTL_SECONDS = 1_800;
 const DEFAULT_CAST_SEARCH_LIMIT = 50;
@@ -131,13 +131,9 @@ function textMatchesAlias(text: string, alias: string) {
   return normalizedText.includes(normalizedAlias);
 }
 
-function formatNeynarTimestamp(date: Date) {
-  return date.toISOString().replace(/\.\d{3}Z$/, "Z");
-}
-
 function buildSearchQuery(alias: string, now: Date) {
   const after = new Date(now.getTime() - SOCIAL_LOOKBACK_DAYS * 24 * 3_600_000);
-  return `"${alias}" after:${formatNeynarTimestamp(after)}`;
+  return `"${alias}" after:${after.toISOString().slice(0, 10)}`;
 }
 
 function castEngagement(cast: NeynarCast) {
@@ -195,7 +191,6 @@ export async function fetchNeynarCastSearchResult(
     const response = await fetch(url, {
       headers: {
         accept: "application/json",
-        api_key: apiKey,
         "x-api-key": apiKey,
         "user-agent": "base-radar/1.0"
       },

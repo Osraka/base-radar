@@ -1,6 +1,6 @@
 import "server-only";
 
-import { isAddress, type Address, type Hex } from "viem";
+import { isAddress, type Address } from "viem";
 import {
   DEFAULT_BLOCK_SCAN_RANGE,
   MAX_BLOCK_SCAN_RANGE,
@@ -25,20 +25,6 @@ export interface ContractActivityResult {
 function toAddress(value: string): Address | null {
   const normalized = value.trim().toLowerCase();
   return isAddress(normalized) ? (normalized as Address) : null;
-}
-
-function extractAddressFromTopic(topic: Hex) {
-  if (!/^0x[0-9a-fA-F]{64}$/.test(topic)) {
-    return null;
-  }
-
-  const address = `0x${topic.slice(-40)}`.toLowerCase();
-
-  if (address === "0x0000000000000000000000000000000000000000") {
-    return null;
-  }
-
-  return isAddress(address) ? address : null;
 }
 
 function resolveFromBlock(toBlock: bigint, requestedFromBlock?: bigint) {
@@ -77,36 +63,27 @@ export async function getRecentContractActivity(
     )
   );
   const transactionHashes = new Set<`0x${string}`>();
-  const uniqueUsers = new Set<string>();
   let logCount = 0;
+
+  if (addresses.length === 0) {
+    throw new Error("NoValidContractAddresses");
+  }
 
   for (const address of addresses) {
     if (logCount >= MAX_INDEXER_LOGS_PER_APP) {
-      break;
+      throw new Error("ContractActivityScanIncomplete");
     }
 
     try {
-      const logs = await client.getLogs({
-        address,
-        fromBlock,
-        toBlock
-      });
-      const remainingLogBudget = MAX_INDEXER_LOGS_PER_APP - logCount;
-      const boundedLogs = logs.slice(0, remainingLogBudget);
+      const logs = await client.getLogs({ address, fromBlock, toBlock });
+      if (logCount + logs.length > MAX_INDEXER_LOGS_PER_APP) {
+        throw new Error("ContractLogBudgetExceeded");
+      }
 
-      logCount += boundedLogs.length;
-
-      for (const log of boundedLogs) {
+      logCount += logs.length;
+      for (const log of logs) {
         if (log.transactionHash) {
           transactionHashes.add(log.transactionHash.toLowerCase() as `0x${string}`);
-        }
-
-        for (const topic of log.topics.slice(1)) {
-          const indexedAddress = extractAddressFromTopic(topic);
-
-          if (indexedAddress) {
-            uniqueUsers.add(indexedAddress);
-          }
         }
       }
     } catch (error) {
@@ -116,12 +93,14 @@ export async function getRecentContractActivity(
         toBlock: toBlock.toString(),
         error: safeRpcErrorName(error)
       });
+      throw new Error("ContractActivityScanIncomplete");
     }
   }
 
   return {
-    txCount: clampCount(transactionHashes.size || logCount),
-    uniqueUsers: clampCount(uniqueUsers.size),
+    txCount: clampCount(transactionHashes.size),
+    // Indexed log topics can be pools, tokens, or beneficiaries, not unique users.
+    uniqueUsers: 0,
     logCount: clampCount(logCount),
     transactionHashes: Array.from(transactionHashes),
     fromBlock: fromBlock.toString(),

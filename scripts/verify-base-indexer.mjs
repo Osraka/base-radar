@@ -266,7 +266,7 @@ await check("Refresh inserted metric metadata", async () => {
   const supabase = createSupabaseAdminClient();
   const { data, error } = await supabase
     .from("app_metrics")
-    .select("source, confidence, notes, measured_at")
+    .select("source, confidence, coverage, metric_origin, notes, tx_24h, tx_7d, unique_users_24h, unique_users_7d, growth_24h, measured_at")
     .eq("source", "base_rpc")
     .order("measured_at", { ascending: false })
     .limit(1);
@@ -276,10 +276,15 @@ await check("Refresh inserted metric metadata", async () => {
   assert(metric, "No base_rpc metric row was found after refresh.");
   assert(metric.confidence === "low", "base_rpc metric confidence should be low.");
   assert(
-    metric.notes === "Estimated from recent contract logs over a limited block range.",
-    "base_rpc metric notes were not saved."
+    metric.coverage === "experimental" && metric.metric_origin === "contract_log_sample",
+    "base_rpc metric coverage should identify the diagnostic sample."
   );
-  return "latest base_rpc metric includes source, confidence, and notes.";
+  assert(metric.notes?.includes("Sample:") && metric.notes?.includes("blocks"), "Block-sample notes were not saved.");
+  assert(metric.tx_24h === 0 && metric.tx_7d === 0, "A short block sample was falsely written as daily/weekly TXs.");
+  assert(metric.unique_users_24h === 0 && metric.unique_users_7d === 0,
+    "Indexed topics were falsely written as unique users.");
+  assert(metric.growth_24h === null, "No comparable daily growth baseline exists.");
+  return "latest base_rpc row records a sample without claiming daily transactions or users.";
 });
 
 await check("Apps API exposes metric metadata safely", async () => {

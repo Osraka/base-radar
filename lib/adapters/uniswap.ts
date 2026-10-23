@@ -20,12 +20,11 @@ const UNISWAP_V3_SWAP_EVENT = parseAbiItem(
 
 interface UniswapRouterActivity {
   tx24h: number;
-  users24h: number;
   logCount: number;
   fromBlock: string;
   toBlock: string;
-  confidence: "medium";
-  source: "Base RPC Swap events";
+  confidence: "low";
+  source: "Base RPC V3 router tx hashes";
   notes: string;
 }
 
@@ -78,22 +77,17 @@ async function collectUniswapBaseRouterActivity(): Promise<UniswapRouterActivity
     )
   );
   const logs = logChunks.flat();
-  const uniqueRecipientAddresses = new Set(
-    logs
-      .map((log) => log.args.recipient?.toLowerCase())
-      .filter((address): address is string => Boolean(address))
-  );
+  const transactionHashes = new Set(logs.map((log) => log.transactionHash.toLowerCase()));
 
   return {
-    tx24h: logs.length,
-    users24h: uniqueRecipientAddresses.size,
+    tx24h: transactionHashes.size,
     logCount: logs.length,
     fromBlock: fromBlock.toString(),
     toBlock: currentBlock.toString(),
-    confidence: "medium",
-    source: "Base RPC Swap events",
+    confidence: "low",
+    source: "Base RPC V3 router tx hashes",
     notes:
-      "Uniswap Base activity is estimated from 24h V3 Swap events where sender is SwapRouter02. TX count uses swap log count; tracked wallets use unique swap recipient addresses because fetching every transaction sender would exceed the 10s safety budget. If the RPC sample fails, tx/wallet counts are left unavailable rather than forced to zero."
+      "Approximate 24h Base V3 SwapRouter02 subset: distinct transaction hashes from pool Swap events. The recipient is not necessarily the trader, so wallet counts are withheld. V2, V4, other routers, and swaps outside the scanned block window are excluded."
   };
 }
 
@@ -139,7 +133,7 @@ export function createUniswapBaseAdapter(
   return {
     slug: "uniswap-base",
     supportsVolume: true,
-    supportsUsers: true,
+    supportsUsers: false,
     supportsTxs: true,
     async getMetrics(): Promise<AdapterMetrics> {
       try {
@@ -157,18 +151,18 @@ export function createUniswapBaseAdapter(
             defillamaMetrics?.tvlUsd
         );
         const hasRouterActivity = Boolean(
-          hasPositiveMetric(routerActivity?.tx24h) ||
-            hasPositiveMetric(routerActivity?.users24h)
+          hasPositiveMetric(routerActivity?.tx24h)
         );
         const routerSource = hasRouterSource(routerActivity)
           ? routerActivity.source
           : hasRouterActivity
-            ? "Base RPC Swap events"
+            ? "Base RPC V3 router tx hashes"
             : null;
 
         return {
           tx24h: routerActivity?.tx24h,
-          users24h: routerActivity?.users24h,
+          // Neither pool sender nor output recipient identifies a unique trader.
+          users24h: undefined,
           volume24hUsd: defillamaMetrics?.dexVolume24hUsd,
           fees24hUsd: defillamaMetrics?.fees24hUsd,
           revenue24hUsd: defillamaMetrics?.revenue24hUsd,
@@ -187,10 +181,10 @@ export function createUniswapBaseAdapter(
                 ? "medium"
                 : "limited",
           notes: [
-            "Uniswap on Base adapter: Base-specific DefiLlama DEX volume plus 24h Base RPC Swap events where sender is SwapRouter02.",
+            "Uniswap on Base adapter: Base-specific DefiLlama DEX volume plus an approximate 24h subset of V3 swaps routed through SwapRouter02.",
             defillamaMetrics?.notes,
             routerActivity
-              ? "TX count uses V3 Swap event count for SwapRouter02; tracked wallets use unique swap recipient addresses."
+              ? "TX count deduplicates V3 Swap transaction hashes; recipients are not claimed as users. V2, V4, and other routers are not covered."
               : "Uniswap Base RPC router activity unavailable; tx/wallet fields are shown as limited rather than forced to zero."
           ]
             .filter(Boolean)

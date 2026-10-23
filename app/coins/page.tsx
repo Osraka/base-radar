@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { AlertTriangle, ArrowUpRight, Coins, ShieldCheck } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, CircleHelp, Coins } from "lucide-react";
 import { DataFreshness } from "@/components/DataFreshness";
 import { Footer } from "@/components/Footer";
 import { Header } from "@/components/Header";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
+import { parseCoinCohort, type CoinCohort } from "@/lib/coins/cohorts";
 import { getCoinRadarSnapshot, type CoinQueryOptions } from "@/lib/ranking/coins";
 import { cn, formatCompact, formatCurrency, formatPercent, relativeTime } from "@/lib/utils";
 
@@ -30,7 +31,7 @@ function toSortMode(value?: string): CoinQueryOptions["sort"] {
     : "score";
 }
 
-function riskTone(flags: string[]) {
+function riskTone(flags: string[], honeypotFlagged: boolean | null) {
   if (flags.includes("possible_honeypot") || flags.includes("liquidity_missing")) {
     return "border-rose-400/30 bg-rose-400/10 text-rose-100";
   }
@@ -39,7 +40,11 @@ function riskTone(flags: string[]) {
     return "border-amber-400/30 bg-amber-400/10 text-amber-100";
   }
 
-  return "border-emerald-400/30 bg-emerald-400/10 text-emerald-100";
+  if (honeypotFlagged === null) {
+    return "border-amber-400/30 bg-amber-400/10 text-amber-100";
+  }
+
+  return "border-white/15 bg-white/[0.05] text-muted-foreground";
 }
 
 function singleParam(value: string | string[] | undefined) {
@@ -49,7 +54,7 @@ function singleParam(value: string | string[] | undefined) {
 function buildCoinsHref(input: {
   sort?: CoinQueryOptions["sort"];
   limit?: number;
-  newOnly?: boolean;
+  cohort?: CoinCohort | null;
   verifiedOnly?: boolean;
   risk?: CoinQueryOptions["risk"];
 }) {
@@ -63,8 +68,8 @@ function buildCoinsHref(input: {
     params.set("limit", String(input.limit));
   }
 
-  if (input.newOnly) {
-    params.set("new", "true");
+  if (input.cohort) {
+    params.set("cohort", input.cohort);
   }
 
   if (input.verifiedOnly) {
@@ -86,7 +91,8 @@ export default async function CoinsPage({
 }) {
   const params = await searchParams;
   const sort = toSortMode(singleParam(params.sort));
-  const newOnly = singleParam(params.new) === "true";
+  const cohort = parseCoinCohort(singleParam(params.cohort)) ??
+    (singleParam(params.new) === "true" ? "new-launches" : null);
   const verifiedOnly = singleParam(params.verified) === "true";
   const riskParam = singleParam(params.risk);
   const risk = riskParam === "lower" || riskParam === "high" ? riskParam : "all";
@@ -97,11 +103,11 @@ export default async function CoinsPage({
   const snapshot = await getCoinRadarSnapshot({
     limit,
     sort,
-    newOnly,
+    cohort,
     verifiedOnly,
     risk
   });
-  const lowerRiskSelected = verifiedOnly && risk === "lower";
+  const lowerRiskSelected = risk === "lower";
   const factoryPoolCount = snapshot.coins.filter((coin) =>
     coin.labels.some((label) => label === "Factory" || label === "New Pool")
   ).length;
@@ -140,7 +146,31 @@ export default async function CoinsPage({
           </div>
         </section>
 
-        <section className="mt-6 flex flex-wrap gap-2">
+        <nav aria-label="Coin discovery views" className="mt-6 flex flex-wrap gap-2">
+          {[
+            [null, "All coins"],
+            ["new-launches", "New Launches"],
+            ["early-momentum", "Early Momentum"],
+            ["established-leaders", "Established Leaders"],
+            ["unusual-activity", "Unusual Activity"]
+          ].map(([value, label]) => (
+            <Link
+              key={value ?? "all"}
+              href={buildCoinsHref({ sort: value === "new-launches" ? "newest" : sort,
+                limit, cohort: value as CoinCohort | null, verifiedOnly, risk })}
+              aria-current={cohort === value ? "page" : undefined}
+              className={cn(buttonVariants({ variant: cohort === value ? "default" : "secondary", size: "sm" }))}
+            >
+              {label}
+            </Link>
+          ))}
+        </nav>
+        <p className="mt-2 text-xs leading-5 text-muted-foreground">
+          New Launches require a pair creation time within 24h; other views use fresh market observations.
+          No view verifies token safety or tradeability.
+        </p>
+
+        <section className="mt-5 flex flex-wrap gap-2">
           {[
             ["score", "Trend score"],
             ["newest", "Newest"],
@@ -156,7 +186,7 @@ export default async function CoinsPage({
               href={buildCoinsHref({
                 sort: value as CoinQueryOptions["sort"],
                 limit,
-                newOnly,
+                cohort,
                 verifiedOnly,
                 risk
               })}
@@ -169,36 +199,30 @@ export default async function CoinsPage({
           ))}
           <Link
             href={buildCoinsHref({
-              sort: "newest",
-              limit,
-              newOnly: !newOnly,
-              verifiedOnly,
-              risk
-            })}
-            className={cn(buttonVariants({ variant: newOnly ? "default" : "secondary", size: "sm" }))}
-          >
-            New pools
-          </Link>
-          <Link
-            href={buildCoinsHref({
               sort,
               limit,
-              newOnly,
-              verifiedOnly: !lowerRiskSelected,
+              cohort,
+              verifiedOnly,
               risk: lowerRiskSelected ? "all" : "lower"
             })}
             className={cn(buttonVariants({ variant: lowerRiskSelected ? "default" : "secondary", size: "sm" }))}
           >
-            Lower risk
+            No major flags
           </Link>
           <Link
-            href={buildCoinsHref({ sort, limit: 100, newOnly, verifiedOnly, risk })}
+            href={buildCoinsHref({ sort, limit, cohort, verifiedOnly: !verifiedOnly, risk })}
+            className={cn(buttonVariants({ variant: verifiedOnly ? "default" : "secondary", size: "sm" }))}
+          >
+            Verified metadata
+          </Link>
+          <Link
+            href={buildCoinsHref({ sort, limit: 100, cohort, verifiedOnly, risk })}
             className={cn(buttonVariants({ variant: limit === 100 ? "default" : "secondary", size: "sm" }))}
           >
             Top 100
           </Link>
           <Link
-            href={buildCoinsHref({ sort, limit: 300, newOnly, verifiedOnly, risk })}
+            href={buildCoinsHref({ sort, limit: 300, cohort, verifiedOnly, risk })}
             className={cn(buttonVariants({ variant: limit === 300 ? "default" : "secondary", size: "sm" }))}
           >
             Top 300
@@ -226,8 +250,10 @@ export default async function CoinsPage({
           <div className="divide-y divide-white/10">
             {snapshot.coins.length === 0 ? (
               <div className="p-8 text-sm text-muted-foreground">
-                {newOnly
-                  ? "No pools with a verified creation time in the last 24 hours. Try all coins."
+                {cohort === "new-launches"
+                  ? "No fresh pools with a reported creation time in the last 24 hours. Try all coins."
+                  : cohort
+                    ? "No coins currently meet this view's time and market-signal criteria. Try all coins."
                   : "No Base coins found yet. Discovery may be waiting for DexScreener data or Supabase migration setup."}
               </div>
             ) : (
@@ -284,13 +310,19 @@ export default async function CoinsPage({
                   <span>
                     <Badge className={cn("gap-1", coin.isStale
                       ? "border-amber-400/30 bg-amber-400/10 text-amber-100"
-                      : riskTone(coin.riskFlags))}>
+                      : riskTone(coin.riskFlags, coin.honeypotFlagged))}>
                       {coin.riskFlags.length ? (
                         <AlertTriangle className="h-3 w-3" />
                       ) : (
-                        <ShieldCheck className="h-3 w-3" />
+                        <CircleHelp className="h-3 w-3" />
                       )}
-                      {coin.isStale ? "Recheck" : coin.riskFlags.length ? "Watch" : "Lower"}
+                      {coin.isStale
+                        ? "Recheck"
+                        : coin.riskFlags.length
+                          ? "Watch"
+                          : coin.honeypotFlagged === null
+                            ? "Unverified"
+                            : "No flags"}
                     </Badge>
                   </span>
                   <span className="flex items-center justify-between gap-2">
@@ -311,7 +343,7 @@ export default async function CoinsPage({
               href={buildCoinsHref({
                 sort,
                 limit: Math.min(limit + 50, 300),
-                newOnly,
+                cohort,
                 verifiedOnly,
                 risk
               })}

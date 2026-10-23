@@ -13,6 +13,7 @@ import type {
   RankedCoin
 } from "@/lib/coins/types";
 import { checkCoinSchemaStatus } from "@/lib/coins/schema";
+import { classifyCoinCohort, type CoinCohort } from "@/lib/coins/cohorts";
 import { compareCoinMetricFreshness, isCoinMetricStale } from "@/lib/coins/freshness";
 import { calculateCoinTrendScore } from "@/lib/scoring/coins";
 import { sanitizeText } from "@/lib/security";
@@ -73,6 +74,7 @@ export interface CoinQueryOptions {
   risk?: "all" | "lower" | "high";
   verifiedOnly?: boolean;
   newOnly?: boolean;
+  cohort?: CoinCohort | null;
 }
 
 interface CoinCandidateLoadResult {
@@ -332,10 +334,13 @@ function applyCoinFilters(coins: BaseCoin[], options: CoinQueryOptions) {
       return false;
     }
 
-    const pairCreatedAt = coin.pairCreatedAt ? new Date(coin.pairCreatedAt).getTime() : NaN;
+    const cohort = classifyCoinCohort(coin, now);
 
-    if (options.newOnly && (!Number.isFinite(pairCreatedAt) ||
-      pairCreatedAt > now || now - pairCreatedAt > 86_400_000)) {
+    if (options.newOnly && cohort !== "new-launches") {
+      return false;
+    }
+
+    if (options.cohort && cohort !== options.cohort) {
       return false;
     }
 
