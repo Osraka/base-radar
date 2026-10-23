@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
@@ -54,19 +55,21 @@ interface AppDetailPageProps {
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-export async function generateMetadata({ params }: AppDetailPageProps) {
+export async function generateMetadata({ params }: AppDetailPageProps): Promise<Metadata> {
   const { slug } = await params;
   const app = await getAppBySlug(slug);
 
   if (!app) {
     return {
-      title: "App not found | Base Radar"
+      title: "App not found | Base Radar",
+      robots: { index: false, follow: false }
     };
   }
 
   return {
     title: `${app.name} | Base Radar`,
-    description: app.description
+    description: app.description,
+    alternates: { canonical: `/apps/${encodeURIComponent(app.slug)}` }
   };
 }
 

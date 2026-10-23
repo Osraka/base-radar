@@ -1214,6 +1214,14 @@ Production recommendation:
 - Track whether `duration_ms` grows after adding more apps or richer indexing.
 - Keep this API server-only/admin-only; do not build public UI on top of it.
 
+## Search Visibility and Privacy-Conscious Measurement
+
+- The canonical origin is fixed at `https://base-radar.vercel.app`; Vercel preview hosts and `APP_URL` never become canonical URLs. Update `lib/site.ts` deliberately if the public domain changes.
+- `/sitemap.xml` lists the homepage, coin tracker, submit page and only approved app detail pages. Pending app discoveries and individual coin pages are excluded. Non-production Vercel previews use `noindex` and a disallow-all robots policy.
+- `npm run verify:seo` checks canonicals, robots and sitemap against `APP_URL` (for example `APP_URL=https://base-radar.vercel.app npm run verify:seo`).
+- Product analytics are **planned, not enabled**. Proposed aggregate events are `app_detail_open` (source view and approved app slug), `coin_detail_open` (source view and address), `discovery_cohort_select` (cohort name), and `return_visit` (coarse first-party returning-session flag). Do not send wallet addresses, IPs, contact details, searches, referral query strings, or raw user identifiers as event properties.
+- Before enabling measurement, choose an analytics provider, configure retention and any applicable consent controls, and document the collection purpose. Count aggregate events only; do not claim traffic, conversion or repeat-visit results without actual analytics or Search Console access.
+
 ## Architecture
 
 - UI reads app data through `lib/data.ts` only.

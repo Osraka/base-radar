@@ -5,7 +5,8 @@ import { Card, CardContent } from "@/components/ui/card";
 
 export const metadata = {
   title: "Submit Your App | Base Radar",
-  description: "Submit a Base app to be reviewed for Base Radar rankings."
+  description: "Submit a Base app to be reviewed for Base Radar rankings.",
+  alternates: { canonical: "/submit" }
 };
 
 interface SubmitPageProps {

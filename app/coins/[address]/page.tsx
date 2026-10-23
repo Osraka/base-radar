@@ -24,13 +24,20 @@ export async function generateMetadata({
 
   if (!coin) {
     return {
-      title: "Base Coin Not Found | Base Radar"
+      title: "Base Coin Not Found | Base Radar",
+      robots: { index: false, follow: false }
     };
   }
 
   return {
     title: `${coin.symbol} on Base | Base Radar`,
-    description: `Track ${coin.name} liquidity, volume, risk flags, and early discovery score on Base.`
+    description: `Track ${coin.name} liquidity, volume, risk flags, and early discovery score on Base.`,
+    alternates: { canonical: `/coins/${coin.tokenAddress.toLowerCase()}` },
+    robots: {
+      index: process.env.VERCEL_ENV === "production" &&
+        coin.verificationStatus === "verified" && coin.riskFlags.length === 0,
+      follow: process.env.VERCEL_ENV === "production"
+    }
   };
 }
 

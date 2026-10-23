@@ -16,7 +16,8 @@ export const revalidate = 0;
 export const metadata: Metadata = {
   title: "New Base Coins and Token Tracker | Base Radar",
   description:
-    "Track trending Base coins, newly launched Base tokens, liquidity, volume, risk flags, and early discovery signals."
+    "Track trending Base coins, newly launched Base tokens, liquidity, volume, risk flags, and early discovery signals.",
+  alternates: { canonical: "/coins" }
 };
 
 function toSortMode(value?: string): CoinQueryOptions["sort"] {
