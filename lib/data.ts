@@ -379,7 +379,8 @@ async function getAppsFromSupabase(): Promise<AppWithMetrics[]> {
       const history = metricsByAppId.get(app.id) ?? [];
       const growth24h = getComparableGrowth(history, app, "tx", 24, now);
       const growth7d = getComparableGrowth(history, app, "tx", 24 * 7, now);
-      const updatedMetrics = { ...app.metrics, growth24h, growth7d };
+      const volumeGrowth7d = getComparableGrowth(history, app, "volume", 24 * 7, now);
+      const updatedMetrics = { ...app.metrics, growth24h, growth7d, volumeGrowth7d };
 
       return {
         ...app,

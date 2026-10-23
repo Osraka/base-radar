@@ -528,6 +528,15 @@ App discovery and ranking updates:
 - Large verified protocols can still appear through reliable TVL/volume data,
   but TVL-only apps are treated as lower engagement than apps with current
   usage.
+- The public trend rank remains the established score. The shared ranking
+  snapshot also exposes an Activity Score and a separate Verified 7d Momentum
+  Score; TVL alone contributes to neither. Momentum requires a fresh metric,
+  medium-or-better confidence and coverage, minimum tracked TX or volume, and
+  a same-source observation near both ends of a seven-day window. Missing or
+  stale history leaves momentum unavailable rather than inventing growth.
+  Early Discoveries contains only recently tracked apps that pass these gates;
+  it does not claim the app itself launched recently. Homepage, detail page and
+  `/api/apps` consume the same ranking snapshot and signal eligibility.
 - Newly discovered apps should enter `candidate_apps` first. They should only be
   promoted to the approved app leaderboard after source validation and enough
   interaction signal; Base Radar should not auto-approve every discovered link.

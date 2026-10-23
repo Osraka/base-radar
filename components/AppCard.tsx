@@ -60,6 +60,11 @@ export function AppCard({ app, rank }: AppCardProps) {
                 <div className="mt-1 flex flex-wrap items-center gap-2">
                   <Badge variant="secondary">{app.category}</Badge>
                   <MetricBadge value={app.metrics.growth24h} />
+                  {app.ranking?.signals.earlyDiscoveryEligible ? (
+                    <Badge className="border-primary/30 bg-primary/10 text-blue-100">
+                      Verified momentum
+                    </Badge>
+                  ) : null}
                   {metricDisplay.badges.slice(0, 3).map((badge) => (
                     <Badge
                       key={badge}

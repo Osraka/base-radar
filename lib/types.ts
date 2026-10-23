@@ -40,6 +40,7 @@ export interface AppMetrics {
   volume7d: number;
   growth24h: number | null;
   growth7d: number | null;
+  volumeGrowth7d?: number | null;
   socialMentions24h: number;
   socialMentions7d?: number;
   socialEngagement24h?: number;
@@ -60,8 +61,29 @@ export interface AppMetrics {
   measuredAt: string;
 }
 
+export interface AppRankingSignals {
+  activityScore: number;
+  momentumScore: number | null;
+  momentumEligible: boolean;
+  momentumBasis: "tx" | "volume" | null;
+  momentumGrowth7d: number | null;
+  momentumReason: string;
+  earlyDiscoveryEligible: boolean;
+  activityBreakdown: {
+    transactions: number;
+    wallets: number;
+    volume: number;
+    fees: number;
+    social: number;
+  };
+}
+
 export type AppWithMetrics = BaseApp & {
   metrics: AppMetrics;
+  ranking?: {
+    rank?: number;
+    signals: AppRankingSignals;
+  };
 };
 
 export interface RadarSnapshot {

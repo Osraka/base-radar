@@ -138,6 +138,10 @@ const { calculateWindowChange, getComparableGrowth, getComparableHistoryPoints }
   path.join(rootDir, "lib/metrics/history.ts")
 );
 const { calculateGrowth, calculateTrendScore } = loadTsModule(path.join(rootDir, "lib/scoring.ts"));
+const { calculateAppRankingSignals, calculateAppTrendScore } = loadTsModule(
+  path.join(rootDir, "lib/scoring/apps.ts")
+);
+const { rankAppSnapshot } = loadTsModule(path.join(rootDir, "lib/ranking/apps.ts"));
 const baseClient = loadTsModule(path.join(rootDir, "lib/baseClient.ts"));
 const { getRecentContractActivity } = loadTsModule(path.join(rootDir, "lib/indexer/baseActivity.ts"));
 const React = Module.createRequire(import.meta.url)("react");
@@ -435,6 +439,118 @@ await check("Trend score ignores unverified RPC wallet and TX samples", () => {
     "Changing unverified RPC counts must not change the score."
   );
   return "unverified activity changes neither score nor rank.";
+});
+
+await check("Static TVL alone is neither activity nor verified momentum", () => {
+  const now = Date.now();
+  const app = {
+    id: "static-app", slug: "aave-base", name: "Aave V3 on Base",
+    createdAt: new Date(now - 100 * 86_400_000).toISOString()
+  };
+  const metrics = metric({
+    appId: app.id, measuredAt: new Date(now).toISOString(), source: "protocol_adapter",
+    confidence: "high", coverage: "high", metricOrigin: "defillama",
+    tx24h: 0, tx7d: 0, users24h: 0, users7d: 0,
+    volume24h: 0, volume24hUsd: 0, fees24hUsd: 0,
+    socialMentions24h: 0, socialMentions7d: 0,
+    tvlUsd: 500_000_000, growth24h: null, growth7d: null
+  });
+  const signals = calculateAppRankingSignals(metrics, app, now);
+  assert(signals.activityScore === 0, "TVL was mistaken for recent activity.");
+  assert(signals.momentumScore === null && !signals.momentumEligible,
+    "Large static TVL earned unsupported momentum.");
+  return "large protocol TVL remains visible without winning activity or momentum.";
+});
+
+await check("Comparable growing activity earns momentum and early eligibility", () => {
+  const now = Date.now();
+  const app = {
+    id: "emerging-app", slug: "emerging-app", name: "Emerging App",
+    createdAt: new Date(now - 12 * 86_400_000).toISOString()
+  };
+  const metrics = metric({
+    appId: app.id, measuredAt: new Date(now).toISOString(), source: "builder_codes",
+    confidence: "medium", coverage: "medium", metricOrigin: "builder_codes",
+    tx24h: 110, tx7d: 650, users24h: 30, users7d: 180,
+    volume24h: 0, volume24hUsd: 0, tvlUsd: 0,
+    growth24h: 50, growth7d: 120, volumeGrowth7d: null
+  });
+  const signals = calculateAppRankingSignals(metrics, app, now);
+  assert(signals.activityScore > 0, "Measured transactions did not count as activity.");
+  assert(signals.momentumEligible && signals.momentumBasis === "tx",
+    "Comparable 7d transaction growth was not eligible.");
+  assert(signals.momentumScore > 25 && signals.earlyDiscoveryEligible,
+    "Recently tracked growing app missed the early cohort.");
+  assert(calculateAppRankingSignals({ ...metrics, growth7d: null }, app, now).momentumScore === null,
+    "Missing seven-day baseline produced momentum.");
+  assert(!calculateAppRankingSignals({ ...metrics, confidence: "low" }, app, now).momentumEligible,
+    "Low-confidence metric produced verified momentum.");
+  return "the early cohort requires recent listing, valid growth and confidence.";
+});
+
+await check("Volume-only momentum needs a comparable 7d baseline", () => {
+  const now = Date.now();
+  const app = {
+    id: "volume-app", slug: "volume-app", name: "Volume App",
+    createdAt: new Date(now - 100 * 86_400_000).toISOString()
+  };
+  const metrics = metric({
+    appId: app.id, measuredAt: new Date(now).toISOString(), confidence: "medium",
+    coverage: "medium", metricOrigin: "defillama",
+    tx24h: 0, tx7d: 0, users24h: 0, users7d: 0,
+    volume24h: 900_000, volume24hUsd: 900_000, growth7d: null,
+    volumeGrowth7d: 45, tvlUsd: 20_000_000
+  });
+  const signals = calculateAppRankingSignals(metrics, app, now);
+  assert(signals.momentumEligible && signals.momentumBasis === "volume",
+    "Comparable external volume history did not count.");
+  assert(signals.momentumScore > 0, "Positive volume growth returned zero momentum.");
+  assert(!signals.earlyDiscoveryEligible, "An old app was labeled as an early discovery.");
+  return "economic-only protocols can earn momentum from verified volume history.";
+});
+
+await check("Shared ranking snapshot exposes identical signals to all consumers", () => {
+  const now = Date.now();
+  const app = {
+    id: "shared-app", slug: "shared-app", name: "Shared App", category: "DeFi",
+    logoUrl: "https://example.com/logo.png", description: "Shared snapshot test app",
+    websiteUrl: "https://example.com", contractAddresses: [],
+    createdAt: new Date(now - 15 * 86_400_000).toISOString(),
+    updatedAt: new Date(now).toISOString(),
+    metrics: metric({ appId: "shared-app", measuredAt: new Date(now).toISOString(),
+      source: "builder_codes", confidence: "medium", coverage: "medium",
+      metricOrigin: "builder_codes", tx24h: 100, growth7d: 90 })
+  };
+  const snapshot = rankAppSnapshot([app]);
+  assert(snapshot.apps[0].ranking.rank === 1, "Shared rank is missing.");
+  assert(snapshot.apps[0].ranking.signals.momentumEligible,
+    "Shared API/page snapshot lost momentum metadata.");
+  assert(snapshot.apps[0].ranking.score === snapshot.apps[0].metrics.trendScore,
+    "Displayed score differs from ranking metadata.");
+  return "rank, score and signal metadata travel together in one snapshot.";
+});
+
+await check("Central app rank downweights unverified RPC activity", () => {
+  const now = Date.now();
+  const app = {
+    id: "rpc-app", slug: "aerodrome", name: "Aerodrome", category: "DeFi",
+    logoUrl: "https://example.com/logo.png", description: "RPC coverage test",
+    websiteUrl: "https://example.com", contractAddresses: [],
+    createdAt: new Date(now - 200 * 86_400_000).toISOString(),
+    updatedAt: new Date(now).toISOString(),
+    metrics: metric({ appId: "rpc-app", measuredAt: new Date(now).toISOString(),
+      tx24h: 50_000, tx7d: 350_000, users24h: 20_000, users7d: 140_000,
+      growth24h: 150, metricOrigin: "defillama+base_rpc" })
+  };
+  const fewer = { ...app, metrics: { ...app.metrics,
+    tx24h: 12, tx7d: 84, users24h: 3, users7d: 21 } };
+  const largeScore = rankAppSnapshot([app]).apps[0].ranking.score;
+  const smallScore = rankAppSnapshot([fewer]).apps[0].ranking.score;
+  assert(largeScore === smallScore,
+    "Central ranking still rewards large unverified RPC TX/wallet estimates.");
+  assert(calculateAppTrendScore(app.metrics, app) === largeScore,
+    "Ranking service uses a different scoring path than the exported app scorer.");
+  return "central rank uses app identity when applying metric reliability.";
 });
 
 for (const result of results) {

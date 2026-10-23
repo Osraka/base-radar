@@ -54,10 +54,11 @@ interface DashboardClientProps {
 }
 
 type ConfidenceFilter = MetricConfidence | "All";
-type RadarView = "trending" | "engaged" | "new" | "fastest" | "volume" | "wallets";
+type RadarView = "trending" | "engaged" | "early" | "new" | "fastest" | "volume" | "wallets";
 type SortMode =
   | "score"
   | "engagement"
+  | "momentum"
   | "growth"
   | "txs"
   | "volume"
@@ -72,6 +73,7 @@ const radarViews: Array<{
 }> = [
   { id: "trending", label: "Trending Today", sort: "score" },
   { id: "engaged", label: "Most Engaged", sort: "engagement" },
+  { id: "early", label: "Early Discoveries", sort: "momentum" },
   { id: "fastest", label: "Fastest Growing", sort: "growth" },
   { id: "volume", label: "Highest Volume", sort: "volume" },
   { id: "wallets", label: "Most Active Wallets", sort: "wallets" },
@@ -105,24 +107,6 @@ function growthLabel(growth: number | null) {
   return formatPercent(growth);
 }
 
-function appEngagementScore(app: AppWithMetrics) {
-  const reliableTxs = shouldShowNumericTxs(app.metrics, app) ? app.metrics.tx7d || app.metrics.tx24h * 7 : 0;
-  const reliableWallets = shouldShowNumericUsers(app.metrics, app)
-    ? app.metrics.users7d || app.metrics.users24h * 7
-    : 0;
-  const social = app.metrics.socialMentions7d ?? app.metrics.socialMentions24h;
-  const economic =
-    app.metrics.volume24hUsd ??
-    app.metrics.volume24h ??
-    app.metrics.fees24hUsd ??
-    0;
-
-  return reliableTxs * 2 +
-    reliableWallets * 8 +
-    Math.min(economic, 1_000_000) / 250 +
-    social * 120;
-}
-
 export function DashboardClient({
   apps,
   globalLastUpdated,
@@ -138,10 +122,7 @@ export function DashboardClient({
   const [query, setQuery] = useState("");
   const debouncedQuery = useDebouncedValue(query);
 
-  const rankedApps = useMemo(
-    () => [...apps].sort((a, b) => b.metrics.trendScore - a.metrics.trendScore),
-    [apps]
-  );
+  const rankedApps = apps;
 
   const filteredApps = useMemo(() => {
     const normalizedQuery = debouncedQuery.trim().toLowerCase();
@@ -187,18 +168,24 @@ export function DashboardClient({
       volume: (a, b) => volumeValue(b) - volumeValue(a),
       tvl: (a, b) => tvlValue(b) - tvlValue(a) || volumeValue(b) - volumeValue(a),
       wallets: (a, b) => walletValue(b) - walletValue(a),
-      engagement: (a, b) => appEngagementScore(b) - appEngagementScore(a),
+      engagement: (a, b) => (b.ranking?.signals.activityScore ?? 0) -
+        (a.ranking?.signals.activityScore ?? 0),
+      momentum: (a, b) => (b.ranking?.signals.momentumScore ?? -1) -
+        (a.ranking?.signals.momentumScore ?? -1),
       freshness: (a, b) =>
         new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     };
-    const viewFiltered =
-      radarView === "new" ? filteredApps.filter(isNewToday) : filteredApps;
+    const viewFiltered = radarView === "new"
+      ? filteredApps.filter(isNewToday)
+      : radarView === "early"
+        ? filteredApps.filter((app) => app.ranking?.signals.earlyDiscoveryEligible)
+        : filteredApps;
 
     return [...viewFiltered].sort(sorters[sortMode]);
   }, [filteredApps, radarView, sortMode]);
 
   const globalRankById = useMemo(
-    () => new Map(rankedApps.map((app, index) => [app.id, index + 1])),
+    () => new Map(rankedApps.map((app, index) => [app.id, app.ranking?.rank ?? index + 1])),
     [rankedApps]
   );
 
@@ -444,6 +431,7 @@ export function DashboardClient({
           >
             <option value="score" className="bg-[#07101f]">Sort: Trend score</option>
             <option value="engagement" className="bg-[#07101f]">Sort: Engagement</option>
+            <option value="momentum" className="bg-[#07101f]">Sort: Verified 7d momentum</option>
             <option value="growth" className="bg-[#07101f]">Sort: 24h growth</option>
             <option value="txs" className="bg-[#07101f]">Sort: TXs</option>
             <option value="wallets" className="bg-[#07101f]">Sort: Wallets</option>
@@ -491,6 +479,8 @@ export function DashboardClient({
             description={
               radarView === "new"
                 ? "No approved app was added in the last 24 hours. Switch tabs or clear filters."
+                : radarView === "early"
+                  ? "No recently tracked app has comparable 7d growth, sufficient activity and coverage yet."
                 : "Clear the search or switch filters to continue scanning."
             }
             actionLabel="Reset filters"

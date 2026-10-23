@@ -4,6 +4,7 @@ import { useId, useState } from "react";
 import { HelpCircle, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { TREND_BENCHMARKS } from "@/lib/constants";
+import { appConfidencePenalty } from "@/lib/scoring/apps";
 import {
   getMetricDisplayState,
   getSocialDisplayState
@@ -35,12 +36,7 @@ function scoreParts(app: AppWithMetrics) {
     0,
     (Date.now() - new Date(metric.measuredAt).getTime()) / 3_600_000
   );
-  const confidencePenalty =
-    metric.confidence === "high" && metric.coverage === "high"
-      ? 0
-      : metric.confidence === "low" || metric.coverage === "limited"
-        ? 18
-        : 8;
+  const confidencePenalty = appConfidencePenalty(metric.confidence);
   const recentInteraction =
     metric.tx7d > 0 ||
     metric.users7d > 0 ||
@@ -109,10 +105,10 @@ function scoreParts(app: AppWithMetrics) {
       label: "Confidence penalty",
       value: confidencePenalty === 0
         ? "none"
-        : `-${confidencePenalty}% (${metric.confidence} / ${metric.coverage ?? "limited"})`,
+        : `-${confidencePenalty} points (${metric.confidence} / ${metric.coverage ?? "limited"})`,
       weight: 0,
       progress: 100 - confidencePenalty,
-      detail: "Low-confidence tx and wallet inputs are downweighted or hidden."
+      detail: "After confidence and coverage scaling, this fixed point penalty is applied. Weak tx and wallet inputs are also downweighted."
     }
   ];
 }
@@ -149,7 +145,7 @@ export function ScoreExplainer({ app, variant = "button" }: ScoreExplainerProps)
           onClick={() => setOpen(false)}
         >
           <div
-            className="w-full max-w-2xl rounded-lg border border-white/10 bg-[#08111f] p-5 shadow-2xl"
+            className="max-h-[calc(100dvh-1.5rem)] w-full max-w-2xl overflow-y-auto rounded-lg border border-white/10 bg-[#08111f] p-5 shadow-2xl"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-4 border-b border-white/10 pb-4">
@@ -170,6 +166,33 @@ export function ScoreExplainer({ app, variant = "button" }: ScoreExplainerProps)
                 <X className="h-4 w-4" />
               </button>
             </div>
+
+            {app.ranking?.signals ? (
+              <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                <div className="rounded-md border border-white/10 bg-white/[0.035] p-3">
+                  <p className="text-xs text-muted-foreground">Activity score</p>
+                  <p className="metric-tabular mt-1 text-xl font-semibold text-white">
+                    {app.ranking.signals.activityScore.toFixed(1)}
+                  </p>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                    Recent tracked transactions, wallets, volume, fees and capped social signals. TVL alone does not count as activity.
+                  </p>
+                </div>
+                <div className="rounded-md border border-white/10 bg-white/[0.035] p-3">
+                  <p className="text-xs text-muted-foreground">Verified 7d momentum</p>
+                  <p className="metric-tabular mt-1 text-xl font-semibold text-white">
+                    {app.ranking.signals.momentumScore === null
+                      ? "Insufficient history"
+                      : app.ranking.signals.momentumScore.toFixed(1)}
+                  </p>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                    {app.ranking.signals.momentumGrowth7d === null
+                      ? app.ranking.signals.momentumReason
+                      : `${formatPercent(app.ranking.signals.momentumGrowth7d)} comparable 7d ${app.ranking.signals.momentumBasis === "tx" ? "tracked TX" : "volume"} change. ${app.ranking.signals.momentumReason}`}
+                  </p>
+                </div>
+              </div>
+            ) : null}
 
             <div className="mt-5 grid gap-3 sm:grid-cols-2">
               {parts.map((part) => (

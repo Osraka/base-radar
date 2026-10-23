@@ -128,7 +128,7 @@ export default async function AppDetailPage({ params }: AppDetailPageProps) {
     notFound();
   }
 
-  const rank = snapshot.apps.findIndex((candidate) => candidate.slug === app.slug) + 1;
+  const rank = app.ranking?.rank ?? snapshot.apps.findIndex((candidate) => candidate.slug === app.slug) + 1;
   const similarApps = snapshot.apps
     .filter((candidate) => candidate.category === app.category && candidate.slug !== app.slug)
     .slice(0, 3);
@@ -451,7 +451,7 @@ export default async function AppDetailPage({ params }: AppDetailPageProps) {
           </div>
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {similarApps.map((similarApp, index) => (
-              <AppCard key={similarApp.id} app={similarApp} rank={index + 1} />
+              <AppCard key={similarApp.id} app={similarApp} rank={similarApp.ranking?.rank ?? index + 1} />
             ))}
           </div>
         </section>

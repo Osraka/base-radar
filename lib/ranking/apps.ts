@@ -1,12 +1,13 @@
 import "server-only";
 
 import { APP_METRIC_STALE_AFTER_MINUTES } from "@/lib/constants";
-import { calculateAppTrendScore } from "@/lib/scoring/apps";
+import { calculateAppRankingSignals, calculateAppTrendScore } from "@/lib/scoring/apps";
 import type {
   AppWithMetrics,
   MetricConfidence,
   MetricCoverage,
-  MetricSource
+  MetricSource,
+  AppRankingSignals
 } from "@/lib/types";
 
 export interface RankedAppMetadata {
@@ -19,6 +20,7 @@ export interface RankedAppMetadata {
   sourceList: MetricSource[];
   isStale: boolean;
   staleReason?: string;
+  signals: AppRankingSignals;
 }
 
 export type RankedApp = AppWithMetrics & {
@@ -35,7 +37,8 @@ export interface AppRankingSnapshot {
 
 export function isAppMetricStale(
   measuredAt: string | null | undefined,
-  staleAfterMinutes = APP_METRIC_STALE_AFTER_MINUTES
+  staleAfterMinutes = APP_METRIC_STALE_AFTER_MINUTES,
+  now = Date.now()
 ) {
   if (!measuredAt) {
     return true;
@@ -47,7 +50,7 @@ export function isAppMetricStale(
     return true;
   }
 
-  return Date.now() - timestamp > staleAfterMinutes * 60_000;
+  return now - timestamp > staleAfterMinutes * 60_000;
 }
 
 export function getGlobalLastUpdated(apps: AppWithMetrics[]) {
@@ -70,7 +73,8 @@ function sourceListForApp(app: AppWithMetrics): MetricSource[] {
 }
 
 export function rankAppSnapshot(apps: AppWithMetrics[]): AppRankingSnapshot {
-  const calculatedAt = new Date().toISOString();
+  const now = Date.now();
+  const calculatedAt = new Date(now).toISOString();
   const scoredApps = apps.map((app) => {
     const score = calculateAppTrendScore(app.metrics, app);
 
@@ -89,7 +93,7 @@ export function rankAppSnapshot(apps: AppWithMetrics[]): AppRankingSnapshot {
         new Date(appA.metrics.measuredAt).getTime()
     )
     .map<RankedApp>((app, index) => {
-      const isStale = isAppMetricStale(app.metrics.measuredAt);
+      const isStale = isAppMetricStale(app.metrics.measuredAt, APP_METRIC_STALE_AFTER_MINUTES, now);
 
       return {
         ...app,
@@ -101,6 +105,7 @@ export function rankAppSnapshot(apps: AppWithMetrics[]): AppRankingSnapshot {
           confidence: app.metrics.confidence,
           coverage: app.metrics.coverage ?? "limited",
           sourceList: sourceListForApp(app),
+          signals: calculateAppRankingSignals(app.metrics, app, now),
           isStale,
           ...(isStale
             ? { staleReason: "App metrics are older than the trusted freshness window." }
@@ -114,7 +119,7 @@ export function rankAppSnapshot(apps: AppWithMetrics[]): AppRankingSnapshot {
     apps: ranked,
     globalLastUpdated,
     calculatedAt,
-    isDataStale: isAppMetricStale(globalLastUpdated),
+    isDataStale: isAppMetricStale(globalLastUpdated, APP_METRIC_STALE_AFTER_MINUTES, now),
     staleAfterMinutes: APP_METRIC_STALE_AFTER_MINUTES
   };
 }

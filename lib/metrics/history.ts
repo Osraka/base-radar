@@ -55,7 +55,9 @@ function metricValue(metric: AppMetrics, key: HistoryMetricKey) {
     case "wallets":
       return metric.users24h;
     case "volume":
-      return metric.volume24hUsd ?? metric.volume24h;
+      return metric.volume24hUsd && metric.volume24hUsd > 0
+        ? metric.volume24hUsd
+        : metric.volume24h;
     case "tvl":
       return metric.tvlUsd ?? 0;
     case "fees":
