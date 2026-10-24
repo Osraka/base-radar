@@ -6,6 +6,7 @@ import { Star } from "lucide-react";
 import { originLabel } from "@/components/DataReliability";
 import { useWatchlist } from "@/components/useWatchlist";
 import { WatchlistButton } from "@/components/WatchlistButton";
+import { WatchlistAlerts } from "@/components/WatchlistAlerts";
 import { compareAppMetrics } from "@/lib/metrics/comparison";
 import type { AppWithMetrics } from "@/lib/types";
 import { formatCurrency, formatNumber, relativeTime } from "@/lib/utils";
@@ -79,6 +80,8 @@ export function WatchlistClient({ apps }: WatchlistClientProps) {
           <p className="mt-3 text-xs text-muted-foreground">Saving a coin is not a safety endorsement or investment recommendation.</p>
         </section>
       </div>
+
+      <WatchlistAlerts savedAppSlugs={savedApps.map((entry) => entry.id)} />
 
       <section aria-labelledby="comparison-heading" className="mt-12 border-t border-white/10 pt-8">
         <h2 id="comparison-heading" className="text-xl font-semibold text-white">Compare saved apps</h2>

@@ -558,6 +558,27 @@ be revoked, so its measurement time and source remain visible and should be
 considered historical, not a current ranking. Do not distribute a card as a
 performance claim after its underlying measurements are corrected or withdrawn.
 
+### Watchlist browser alerts (opt-in preview)
+
+Saved-app alerts are off by default. On `/watchlist`, the user must explicitly
+enable them and grant the origin browser notification permission. The browser
+records a baseline before any alert is eligible. While the watchlist page is
+open, it checks `/api/apps` every 15 minutes and only notifies on a new,
+server-ranked observation with verified 7d momentum of at least 20%, current
+measurement, medium-or-better confidence and coverage, and non-mock provenance.
+It never computes growth from an unverified client baseline. A browser-scoped
+lock and local delivery log suppress duplicates: at most one notification per
+app and three total in 24 hours. Disabling clears local consent and delivery
+history; logs otherwise expire after 14 days. `npm run verify:browser-alerts`
+checks the trust gates and deduplication rules.
+
+This preview is **not** email or background push: the tab must be open and active,
+the browser must support secure-context notifications, service workers and Web
+Locks. Consent and delivery history are local to this browser, not a verified
+cross-device user account. No server-side subscription or external provider is
+enabled. Cross-device identity, provider verification, retention and delivery
+monitoring remain prerequisites before server-sent alerts can launch.
+
 Token trends:
 
 - Stored in `base_token_trends`.
