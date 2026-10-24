@@ -7,7 +7,7 @@ import type {
 } from "@/lib/social/types";
 
 const NEYNAR_API_BASE_URL = "https://api.neynar.com";
-const NEYNAR_SEARCH_PATH = "/v2/farcaster/cast/search";
+const NEYNAR_SEARCH_PATH = "/v2/farcaster/cast/search/";
 const DEFAULT_NEYNAR_TIMEOUT_MS = 5_000;
 const DEFAULT_NEYNAR_CACHE_TTL_SECONDS = 1_800;
 const DEFAULT_CAST_SEARCH_LIMIT = 50;
@@ -282,6 +282,7 @@ export async function getFarcasterMetricsForApp(
   const matchedAliases = new Set<string>();
   let engagement7d = 0;
   let rawResultCount = 0;
+  let successfulSearches = 0;
   const failedSearches = new Set<string>();
 
   for (const alias of aliases) {
@@ -294,9 +295,11 @@ export async function getFarcasterMetricsForApp(
       failedSearches.add(
         searchResult.status ? `status ${searchResult.status}` : searchResult.error ?? "unknown"
       );
+      if (searchResult.status === 401 || searchResult.status === 403) break;
       continue;
     }
 
+    successfulSearches += 1;
     const casts = searchResult.response?.result?.casts ?? [];
     rawResultCount += casts.length;
 
@@ -345,12 +348,15 @@ export async function getFarcasterMetricsForApp(
     engagement7d: cappedEngagement,
     engagement24h: cappedEngagement,
     trendingScore: Number(trendingScore.toFixed(1)),
-    confidence: mentions7d > 0 && matchedAliases.size > 0 ? "medium" : "low",
+    confidence: mentions7d > 0 && matchedAliases.size > 0 &&
+      successfulSearches === aliases.length ? "medium" : "low",
     source: "farcaster",
     window: "7d",
     notes:
-      failedSearches.size === aliases.length
+      successfulSearches === 0
         ? `Neynar cast search unavailable (${Array.from(failedSearches).join(", ")}).`
+        : failedSearches.size > 0
+          ? "Partial Neynar cast search coverage; some aliases failed. Results are incomplete."
         : "Approximate 7d Farcaster mentions from Neynar cast search using conservative verified app aliases."
   };
 }

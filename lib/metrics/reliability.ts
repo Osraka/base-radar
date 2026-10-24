@@ -274,7 +274,8 @@ export function isSocialDataUnavailable(metric: AppMetrics) {
   return (
     (metric.socialSource === null || metric.socialConfidence === "low") &&
     (metric.socialMentions7d ?? metric.socialMentions24h) === 0 &&
-    (notes.includes("neynar") ||
+    (notes.includes("neynar cast search unavailable") ||
+      notes.includes("neynar api key is not configured") ||
       notes.includes("social metric fetch failed") ||
       notes.includes("social data temporarily unavailable"))
   );
@@ -294,8 +295,8 @@ export function getSocialDisplayState(metric: AppMetrics) {
   if (mentions <= 0) {
     return {
       showNumeric: false,
-      value: "Social source unavailable",
-      caption: "No reliable Farcaster social source is available for this app yet."
+      value: "No matched Farcaster casts in this sample",
+      caption: "Alias-based search is bounded; this is not a full count of all discussion."
     };
   }
 

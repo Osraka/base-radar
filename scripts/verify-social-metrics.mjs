@@ -192,6 +192,9 @@ const { getSocialMetricsForApp } = loadTsModule(
   path.join(rootDir, "lib/social/index.ts")
 );
 const { calculateTrendScore } = loadTsModule(path.join(rootDir, "lib/scoring.ts"));
+const { getSocialDisplayState, isSocialDataUnavailable } = loadTsModule(
+  path.join(rootDir, "lib/metrics/reliability.ts")
+);
 
 await check("Social alias matching is conservative", async () => {
   const zoraAliases = getFarcasterAliasesForApp({ slug: "zora", name: "Zora" });
@@ -231,11 +234,54 @@ await check("Neynar search uses the documented endpoint and only x-api-key", asy
       limit: 1
     });
 
-    assert(captured?.url.pathname === "/v2/farcaster/cast/search", "Search path does not match official docs.");
+    assert(captured?.url.pathname === "/v2/farcaster/cast/search/", "Search path does not match official docs.");
     assert(captured?.headers["x-api-key"] === "test-only", "Documented key header is missing.");
     assert(!("api_key" in captured.headers), "Undocumented duplicate key header is still sent.");
     assert(result.status === 401 && result.response === null, "401 should remain a safe unavailable result.");
     return "documented request shape and redacted 401 fallback verified.";
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+await check("Authorization failure stops alias retries and stays unavailable", async () => {
+  const originalFetch = global.fetch;
+  let attempts = 0;
+  try {
+    global.fetch = async () => {
+      attempts += 1;
+      return { ok: false, status: 401 };
+    };
+    const metrics = await getFarcasterMetricsForApp(
+      { slug: "uniswap-base", name: "Uniswap on Base" },
+      { apiKey: "test-only", limit: 1 }
+    );
+    assert(attempts === 1, "A bad key should not retry every alias.");
+    assert(metrics.mentions7d === 0 && metrics.confidence === "low", "Failed search must not invent mentions.");
+    assert(isSocialDataUnavailable({ ...metrics, socialSource: "farcaster",
+      socialConfidence: metrics.confidence, socialMentions7d: metrics.mentions7d }),
+    "An authorization failure must be displayed as unavailable.");
+    return "single request, low confidence, explicit unavailable state.";
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+await check("A successful empty sample is not mislabeled as an outage", async () => {
+  const originalFetch = global.fetch;
+  try {
+    global.fetch = async () => ({ ok: true, status: 200,
+      json: async () => ({ result: { casts: [] } }) });
+    const metrics = await getFarcasterMetricsForApp(
+      { slug: "moonwell", name: "Moonwell" },
+      { apiKey: "test-only", limit: 1 }
+    );
+    const displayMetric = { ...metrics, socialSource: "farcaster",
+      socialConfidence: metrics.confidence, socialMentions7d: metrics.mentions7d };
+    assert(!isSocialDataUnavailable(displayMetric), "Successful zero-match search is not an outage.");
+    assert(getSocialDisplayState(displayMetric).value === "No matched Farcaster casts in this sample",
+      "Zero-match copy should explain the bounded sample.");
+    return "zero matched casts, low confidence, bounded-sample copy.";
   } finally {
     global.fetch = originalFetch;
   }
