@@ -30,6 +30,7 @@ import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getAppBySlug, getMetricHistoryForApp, getRadarSnapshot } from "@/lib/data";
+import { buildShareEvidence } from "@/lib/share/evidence";
 import {
   getEconomicMetricDisplayState,
   getMetricDisplayState,
@@ -137,6 +138,11 @@ export default async function AppDetailPage({ params }: AppDetailPageProps) {
     .filter((candidate) => candidate.category === app.category && candidate.slug !== app.slug)
     .slice(0, 3);
   const metricHistory = await getMetricHistoryForApp(app.id, 30);
+  const shareEvidence = buildShareEvidence({
+    app,
+    history: metricHistory,
+    calculatedAt: snapshot.calculatedAt ?? app.metrics.measuredAt
+  });
   const metricDisplay = getMetricDisplayState(app.metrics, app);
   const economicDisplay = getEconomicMetricDisplayState(app.metrics);
   const socialDisplay = getSocialDisplayState(app.metrics);
@@ -439,7 +445,7 @@ export default async function AppDetailPage({ params }: AppDetailPageProps) {
                 <CardTitle>Share card preview</CardTitle>
               </CardHeader>
               <CardContent>
-                <ShareCard app={app} rank={rank || 1} />
+                <ShareCard evidence={shareEvidence} />
               </CardContent>
             </Card>
           </aside>

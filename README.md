@@ -541,6 +541,23 @@ App discovery and ranking updates:
   promoted to the approved app leaderboard after source validation and enough
   interaction signal; Base Radar should not auto-approve every discovered link.
 
+### Share card evidence and corrections
+
+The app detail screenshot card is computed from one ranked app snapshot. Its
+deterministic evidence ID covers the app identity, rank, score, measurement time,
+source, confidence, coverage, and any comparable 24-hour baseline/current values.
+A growth claim appears only when both observations use the same source and
+metric origin, cover the full day, have meaningful activity, and are fresh with
+medium-or-better confidence and coverage. Mock, low-confidence, stale, sparse,
+mixed-source, or extreme changes show no growth claim. The card is not a
+generated image pipeline and screenshots are not independently verified records.
+
+If a source corrects or withdraws data, refresh the ranking and stop displaying
+the old claim; recheck the source before reusing it. A saved screenshot cannot
+be revoked, so its measurement time and source remain visible and should be
+considered historical, not a current ranking. Do not distribute a card as a
+performance claim after its underlying measurements are corrected or withdrawn.
+
 Token trends:
 
 - Stored in `base_token_trends`.
@@ -1237,6 +1254,10 @@ Before verified builder profiles go live, use a separate claim record bound to a
 `supabase/migrations/20261024053655_builder_claim_review_boundary.sql` defines private claim and transition-audit tables with RLS, no public policies, service-role-only claim writes, append-only audit writes, and unique active-contact/approved-owner constraints. Its privileged audit trigger lives in an unexposed schema. `20261024053822_builder_claim_audit_order.sql` adds an ordered audit sequence; timestamps alone cannot order events within one transaction. `20261024055551_builder_claim_expiry.sql` allows a timed-out pending challenge to be marked `expired` so a claimant may safely retry. The Supabase advisor's `rls_enabled_no_policy` info notice is intentional for these private tables.
 
 The claim API is feature-gated and off by default (`BUILDER_CLAIMS_ENABLED=false`). It is separate from the listing-submission UI, which remains review-only. To enable it, first apply the three migrations above, configure Supabase server credentials and persistent write rate limiting, and provision at least one **non-anonymous** Supabase Auth moderator. Only a trusted Supabase administrator may set that user's `app_metadata.base_radar_role` to `claim_moderator`; do not use editable `user_metadata`, an email address, or `REFRESH_SECRET` as moderation authority. Rebuild/redeploy after changing the server-only flag.
+
+The private `/admin/builder-claims` page accepts a Supabase Auth magic-link session for an existing user (`shouldCreateUser=false`). `POST /api/admin/auth/magic-link` is same-origin, validated and persistently rate-limited; it returns a generic response so account existence is not disclosed. The browser uses only the public Supabase client and sends its short-lived access token to the same-origin moderation API. The API calls Supabase Auth `getUser` and checks current `app_metadata` server-side before returning private contacts or applying a decision. A signed-in user without the moderator role cannot access the queue. This page is not indexed and does not grant ownership or show a public badge.
+
+For production magic links, set the Supabase Auth **Site URL** to `https://base-radar.vercel.app` and allow the exact redirect `https://base-radar.vercel.app/admin/builder-claims` in Authentication > URL Configuration. Add `http://localhost:3000/admin/builder-claims` only for local development. Do not use broad production redirect wildcards. The email template must honor Supabase's redirect target. Confirm the user's email, role, and a successful moderator sign-in before enabling the claim flag. Domain proof testing still requires control of the stored official app domain; never use someone else's protocol domain or create a fake approved listing in production for a test.
 
 Claim flow (all responses use `Cache-Control: no-store`):
 

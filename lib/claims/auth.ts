@@ -1,18 +1,15 @@
 import "server-only";
 
-import type { User } from "@supabase/supabase-js";
 import { USE_MOCK_DATA } from "@/lib/constants";
+import { isClaimModerator } from "@/lib/claims/roles";
 import { createSupabaseServerClient, isSupabaseServerConfigured } from "@/lib/supabase/server";
 import { isSupabaseAdminConfigured } from "@/lib/supabase/admin";
+
+export { isClaimModerator } from "@/lib/claims/roles";
 
 export function isClaimWorkflowEnabled(): boolean {
   return process.env.BUILDER_CLAIMS_ENABLED === "true" && !USE_MOCK_DATA &&
     isSupabaseServerConfigured() && isSupabaseAdminConfigured();
-}
-
-export function isClaimModerator(user: Pick<User, "id" | "is_anonymous" | "app_metadata"> | null): boolean {
-  return Boolean(user?.id && !user.is_anonymous &&
-    user.app_metadata?.base_radar_role === "claim_moderator");
 }
 
 export async function getClaimModerator(request: Request): Promise<string | null> {

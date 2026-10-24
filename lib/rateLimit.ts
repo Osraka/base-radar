@@ -10,7 +10,7 @@ export interface RateLimitResult {
   resetAt: number;
 }
 
-type LimitScope = "api-read" | "submit" | "refresh";
+type LimitScope = "api-read" | "submit" | "refresh" | "moderator-login";
 type MissingEnvBehavior = "fail-open" | "fail-closed";
 
 interface LimitConfig {
@@ -33,6 +33,13 @@ const configs = {
   },
   submit: {
     scope: "submit",
+    limit: 5,
+    windowMs: 10 * 60_000,
+    window: "10 m",
+    missingEnvBehavior: "fail-closed"
+  },
+  moderatorLogin: {
+    scope: "moderator-login",
     limit: 5,
     windowMs: 10 * 60_000,
     window: "10 m",
@@ -218,6 +225,10 @@ async function limitRequest(request: Request, config: LimitConfig): Promise<Rate
 
 export async function rateLimitSubmission(request: Request) {
   return limitRequest(request, configs.submit);
+}
+
+export async function rateLimitModeratorLogin(request: Request) {
+  return limitRequest(request, configs.moderatorLogin);
 }
 
 export async function rateLimitRefresh(request: Request) {

@@ -151,6 +151,7 @@ const React = Module.createRequire(import.meta.url)("react");
 const { renderToStaticMarkup } = Module.createRequire(import.meta.url)("react-dom/server");
 const { MetricBadge } = loadTsModule(path.join(rootDir, "components/MetricBadge.tsx"));
 const { ShareCard } = loadTsModule(path.join(rootDir, "components/ShareCard.tsx"));
+const { buildShareEvidence } = loadTsModule(path.join(rootDir, "lib/share/evidence.ts"));
 const { ClaimAppPanel } = loadTsModule(path.join(rootDir, "components/ClaimAppPanel.tsx"));
 const { SubmitAppForm } = loadTsModule(path.join(rootDir, "components/SubmitAppForm.tsx"));
 const { verifyDomainClaimProof, canShowVerifiedBuilder } = loadTsModule(
@@ -398,9 +399,11 @@ await check("Missing growth is not presented as a new app or a gain", () => {
     slug: "test-app",
     name: "Test App",
     logoUrl: "https://example.com/logo.png",
-    metrics: metric({ growth24h: null })
+    metrics: metric({ growth24h: null }),
+    ranking: { rank: 1, isStale: false }
   };
-  const share = renderToStaticMarkup(React.createElement(ShareCard, { app, rank: 1 }));
+  const evidence = buildShareEvidence({ app, history: [], calculatedAt: app.metrics.measuredAt });
+  const share = renderToStaticMarkup(React.createElement(ShareCard, { evidence }));
 
   assert(badge.includes("no verified previous-day baseline"), "Null-growth badge lacks context.");
   assert(!badge.includes("New"), "Missing growth is falsely labeled New.");
@@ -410,26 +413,55 @@ await check("Missing growth is not presented as a new app or a gain", () => {
 });
 
 await check("Share card does not claim trending today from sparse metrics", () => {
+  const measuredAt = new Date().toISOString();
   const app = {
     id: "app-test", slug: "test-app", name: "Test App",
     logoUrl: "https://example.com/logo.png",
-    metrics: metric({ growth24h: 80, confidence: "low" }),
-    ranking: { isStale: false }
+    metrics: metric({ growth24h: 80, volume24h: 1_800_000, volume24hUsd: 1_800_000,
+      measuredAt }),
+    ranking: { rank: 1, isStale: false }
   };
-  const weak = renderToStaticMarkup(React.createElement(ShareCard, { app, rank: 1 }));
-  assert(weak.includes("#1 in Base app rankings"), "Share card lost its objective rank.");
-  assert(!weak.includes("Trending on Base Today") && !weak.includes("+80.0%"),
-    "Low-confidence data was promoted as a daily trend.");
-  const verified = renderToStaticMarkup(React.createElement(ShareCard, {
-    app: { ...app, metrics: { ...app.metrics, confidence: "medium" } }, rank: 1
+  const baseline = metric({ measuredAt: new Date(Date.parse(measuredAt) - 24 * 3_600_000).toISOString(),
+    volume24h: 1_000_000, volume24hUsd: 1_000_000 });
+  const history = [baseline, app.metrics];
+  const evidence = buildShareEvidence({ app, history, calculatedAt: measuredAt });
+  const verified = renderToStaticMarkup(React.createElement(ShareCard, { evidence }));
+  assert(verified.includes("#1 in Base app rankings"), "Share card lost its objective rank.");
+  assert(verified.includes("+80.0%"), "Comparable verified growth was hidden.");
+  assert(evidence.growth?.baselineAt === baseline.measuredAt,
+    "Evidence did not retain the measured baseline.");
+  assert(evidence.growth?.baselineValue === 1_000_000 &&
+    evidence.growth?.currentValue === 1_800_000,
+  "Evidence did not retain comparable input values.");
+  assert(evidence.source === app.metrics.source && evidence.measuredAt === measuredAt,
+    "Evidence was not tied to the displayed metric snapshot.");
+  assert(buildShareEvidence({ app, history, calculatedAt: measuredAt }).snapshotId ===
+    evidence.snapshotId, "Equivalent snapshots produced different identities.");
+
+  const withoutGrowth = (changedApp, changedHistory = history) =>
+    buildShareEvidence({ app: changedApp, history: changedHistory, calculatedAt: measuredAt });
+  assert(withoutGrowth(app, []).growth === null, "Missing baseline produced a growth claim.");
+  assert(withoutGrowth({ ...app, metrics: { ...app.metrics, confidence: "low" } }).growth === null,
+    "Low-confidence data produced a growth claim.");
+  assert(withoutGrowth({ ...app, metrics: { ...app.metrics, source: "mock" } }).growth === null,
+    "Mock data produced a growth claim.");
+  assert(withoutGrowth({ ...app, ranking: { rank: 1, isStale: true } }).growth === null,
+    "Stale data produced a growth claim.");
+  assert(buildShareEvidence({ app, history,
+    calculatedAt: new Date(Date.parse(measuredAt) + 3 * 3_600_000).toISOString()
+  }).growth === null, "Old measurements produced a growth claim despite a later snapshot.");
+  assert(withoutGrowth(app, [{ ...baseline, source: "base_rpc" }, app.metrics]).growth === null,
+    "Mixed-source history produced a growth claim.");
+  assert(withoutGrowth(app, [{ ...baseline, metricOrigin: "another-source" }, app.metrics]).growth === null,
+    "Mixed-origin history produced a growth claim.");
+  assert(withoutGrowth(app, [baseline, { ...app.metrics, volume24hUsd: 1_900_000 }]).growth === null,
+    "History that differs from the current metric produced a growth claim.");
+  const staleMarkup = renderToStaticMarkup(React.createElement(ShareCard, {
+    evidence: withoutGrowth({ ...app, ranking: { rank: 1, isStale: true } })
   }));
-  assert(verified.includes("+80.0%"), "Verified recent growth is hidden unnecessarily.");
-  const stale = renderToStaticMarkup(React.createElement(ShareCard, {
-    app: { ...app, metrics: { ...app.metrics, confidence: "medium" },
-      ranking: { isStale: true } }, rank: 1
-  }));
-  assert(!stale.includes("+80.0%"), "Stale growth was used for sharing.");
-  return "only medium-or-better fresh measurements can enter growth copy.";
+  assert(!staleMarkup.includes("+80.0%") && staleMarkup.includes("not available"),
+    "Unverified growth was promoted in share copy.");
+  return "growth copy requires a fresh, comparable, medium-confidence evidence snapshot.";
 });
 
 await check("History excludes other sources and out-of-window observations", () => {

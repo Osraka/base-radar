@@ -3,6 +3,10 @@ import { sanitizeText } from "@/lib/security";
 
 export const claimIdSchema = z.string().uuid();
 
+export const moderatorLinkSchema = z.object({
+  email: z.string().trim().toLowerCase().email().max(254)
+});
+
 export const claimRequestSchema = z.object({
   appSlug: z.string().regex(/^[a-z0-9][a-z0-9-]{0,79}$/),
   contact: z.string().min(3).max(240)
@@ -27,6 +31,22 @@ export const claimDecisionSchema = z.object({
 export const claimStatusSchema = z.enum([
   "pending", "proof_checked", "approved", "rejected", "disputed", "revoked", "expired"
 ]);
+
+export const claimSummarySchema = z.object({
+  id: claimIdSchema,
+  app_id: z.string().uuid(),
+  claimant_contact: z.string(),
+  canonical_hostname: z.string(),
+  status: claimStatusSchema,
+  created_at: z.string(),
+  challenge_expires_at: z.string(),
+  proof_checked_at: z.string().nullable(),
+  reviewed_at: z.string().nullable(),
+  reviewed_by: z.string().nullable(),
+  revoked_at: z.string().nullable()
+});
+
+export type ClaimSummary = z.infer<typeof claimSummarySchema>;
 
 export const approvedClaimAppSchema = z.object({
   id: z.string().uuid(),

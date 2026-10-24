@@ -68,6 +68,9 @@ await check("Claim input rejects malformed slugs, contacts and challenge tokens"
     appSlug: "uniswap-base", contact: "BUILDER@EXAMPLE.ORG"
   }).contact, "builder@example.org");
   assert(schemas.claimStatusSchema.safeParse("expired").success);
+  assert.equal(schemas.moderatorLinkSchema.parse({ email: "  MODERATOR@EXAMPLE.ORG  " }).email,
+    "moderator@example.org");
+  assert(!schemas.moderatorLinkSchema.safeParse({ email: "not-an-email" }).success);
 });
 
 await check("Only verified Supabase app_metadata grants moderation", () => {
@@ -171,6 +174,16 @@ await check("No browser bundle imports admin claim service or service key", () =
   for (const file of ["lib/claims/service.ts", "lib/claims/http.ts"]) {
     assert(fs.readFileSync(path.join(root, file), "utf8").includes('import "server-only"'));
   }
+  const consoleSource = fs.readFileSync(path.join(root, "components/ModeratorClaimsConsole.tsx"), "utf8");
+  assert(consoleSource.includes('"use client"'));
+  assert(consoleSource.includes('createSupabaseBrowserClient'));
+  assert(!consoleSource.includes("SUPABASE_SERVICE_ROLE_KEY"));
+  assert(!consoleSource.includes("createSupabaseAdminClient"));
+  const loginRoute = fs.readFileSync(path.join(root, "app/api/admin/auth/magic-link/route.ts"), "utf8");
+  assert(loginRoute.includes("rateLimitModeratorLogin(request)"));
+  assert(loginRoute.includes("shouldCreateUser: false"));
+  assert(loginRoute.includes('siteUrl("/admin/builder-claims")'));
+  assert(loginRoute.includes('new URL("/admin/builder-claims", request.url)'));
 });
 
 await check("Claim writes use compare-and-swap guards", () => {
