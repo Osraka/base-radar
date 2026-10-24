@@ -31,6 +31,7 @@
     "verify-base-social-radar": "node scripts/verify-base-social-radar.mjs",
     "verify-trend-expansion": "node scripts/verify-trend-expansion.mjs",
     "verify-metric-credibility": "node scripts/verify-metric-credibility.mjs",
+    "verify:builder-claims": "node scripts/verify-builder-claims.mjs",
     "verify-token-radar": "node scripts/verify-token-radar.mjs",
     "verify-token-factory-discovery": "node scripts/verify-token-factory-discovery.mjs",
     "verify-token-snapshots": "node scripts/verify-token-snapshots.mjs",

@@ -68,7 +68,7 @@ export function verifyDomainClaimProof(
 }
 
 export interface ReviewedClaim {
-  status: "pending" | "proof_checked" | "approved" | "rejected" | "disputed" | "revoked";
+  status: "pending" | "proof_checked" | "approved" | "rejected" | "disputed" | "revoked" | "expired";
   appId: string;
   proofHostname: string;
   proofCheckedAt: string | null;
