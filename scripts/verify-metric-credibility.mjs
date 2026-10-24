@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { createHash } from "node:crypto";
 import Module from "node:module";
 import path from "node:path";
 import process from "node:process";
@@ -150,6 +151,187 @@ const React = Module.createRequire(import.meta.url)("react");
 const { renderToStaticMarkup } = Module.createRequire(import.meta.url)("react-dom/server");
 const { MetricBadge } = loadTsModule(path.join(rootDir, "components/MetricBadge.tsx"));
 const { ShareCard } = loadTsModule(path.join(rootDir, "components/ShareCard.tsx"));
+const { ClaimAppPanel } = loadTsModule(path.join(rootDir, "components/ClaimAppPanel.tsx"));
+const { SubmitAppForm } = loadTsModule(path.join(rootDir, "components/SubmitAppForm.tsx"));
+const { verifyDomainClaimProof, canShowVerifiedBuilder } = loadTsModule(
+  path.join(rootDir, "lib/claims/policy.ts")
+);
+const { checkDnsClaimProof } = loadTsModule(path.join(rootDir, "lib/claims/dns.ts"));
+const { planClaimDecision } = loadTsModule(path.join(rootDir, "lib/claims/moderation.ts"));
+
+await check("Listing review never presents itself as builder ownership proof", () => {
+  const app = {
+    slug: "uniswap-base", name: "Uniswap on Base", metrics: metric()
+  };
+  const panel = renderToStaticMarkup(React.createElement(ClaimAppPanel, { app }));
+  const form = renderToStaticMarkup(React.createElement(SubmitAppForm, {
+    claimSlug: "uniswap-base"
+  }));
+  assert(panel.includes("Request claim review"), "Claim action implies verification rather than review.");
+  assert(form.includes("not a verified ownership claim"), "Form omits the ownership warning.");
+  assert(form.includes("contract field accepts Ethereum addresses only"),
+    "Form still tells submitters to put evidence URLs in an address-only field.");
+  assert(!form.includes("Claim flow started"), "Form still announces a nonexistent claim flow.");
+  return "the public entry point stays review-only until proof and moderation exist.";
+});
+
+await check("Builder claim proof requires the exact official-domain challenge", () => {
+  const now = Date.now();
+  const token = "a".repeat(64);
+  const challenge = {
+    canonicalHostname: "example.org",
+    tokenDigest: createHash("sha256").update(token).digest("hex"),
+    issuedAt: new Date(now - 60_000).toISOString(),
+    expiresAt: new Date(now + 14 * 60_000).toISOString(),
+    usedAt: null
+  };
+  const observation = {
+    hostname: "_base-radar-claim.example.org",
+    txtRecords: [`base-radar-claim=${token}`],
+    observedAt: new Date(now).toISOString()
+  };
+  assert(verifyDomainClaimProof(challenge, observation), "Exact valid domain proof was rejected.");
+  assert(!verifyDomainClaimProof(challenge, { ...observation,
+    hostname: "_base-radar-claim.attacker.org" }), "Wrong domain proof was accepted.");
+  assert(!verifyDomainClaimProof(challenge, { ...observation,
+    txtRecords: [`base-radar-claim=${"b".repeat(64)}`] }), "Wrong token was accepted.");
+  assert(!verifyDomainClaimProof({ ...challenge, usedAt: new Date(now).toISOString() },
+    observation), "Replayed challenge was accepted.");
+  assert(!verifyDomainClaimProof({ ...challenge,
+    expiresAt: new Date(now - 1).toISOString() }, observation),
+  "Expired challenge was accepted.");
+  assert(!verifyDomainClaimProof({ ...challenge, canonicalHostname: "127.0.0.1" },
+    observation), "IP address was accepted as an official domain.");
+  return "wrong host, token, expiry, replay and IP-host proofs are rejected.";
+});
+
+await check("Builder DNS proof reads only the official TXT record and fails closed", async () => {
+  const now = Date.now();
+  const token = "b".repeat(64);
+  const challenge = {
+    canonicalHostname: "example.org",
+    tokenDigest: createHash("sha256").update(token).digest("hex"),
+    issuedAt: new Date(now - 1_000).toISOString(),
+    expiresAt: new Date(now + 60_000).toISOString(),
+    usedAt: null
+  };
+  let observedHostname = "";
+  const valid = await checkDnsClaimProof(challenge, {
+    now: () => now,
+    resolveTxtRecords: async (hostname) => {
+      observedHostname = hostname;
+      return [["base-radar-claim=", token]];
+    }
+  });
+  assert(valid && observedHostname === "_base-radar-claim.example.org",
+    "Valid segmented official-domain TXT proof was rejected.");
+  assert(!await checkDnsClaimProof({ ...challenge, canonicalHostname: "localhost" }, {
+    resolveTxtRecords: async () => { throw new Error("Invalid domain reached DNS resolver."); }
+  }), "Invalid hostname was accepted.");
+  assert(!await checkDnsClaimProof(challenge, {
+    resolveTxtRecords: async () => { throw new Error("DNS unavailable."); }
+  }), "Resolver failure was accepted.");
+  let expiredLookupAttempted = false;
+  assert(!await checkDnsClaimProof({ ...challenge,
+    expiresAt: new Date(now - 1).toISOString() }, {
+    now: () => now,
+    resolveTxtRecords: async () => {
+      expiredLookupAttempted = true;
+      return [];
+    }
+  }) && !expiredLookupAttempted, "Expired challenge still queried DNS.");
+  assert(!await checkDnsClaimProof(challenge, {
+    timeoutMs: 5,
+    resolveTxtRecords: () => new Promise(() => {})
+  }), "Timed-out DNS lookup was accepted.");
+  return "only the stored official domain is queried; failures and timeouts grant no proof.";
+});
+
+await check("Builder verification badge needs proof and separate moderator approval", () => {
+  const now = Date.now();
+  const claim = {
+    appId: "app-1", proofHostname: "example.org", status: "approved",
+    proofCheckedAt: new Date(now - 60_000).toISOString(),
+    reviewedAt: new Date(now).toISOString(), reviewerId: "moderator-1",
+    revokedAt: null
+  };
+  assert(canShowVerifiedBuilder(claim, "app-1", "example.org"),
+    "Proof-backed approved claim was rejected.");
+  assert(!canShowVerifiedBuilder({ ...claim, status: "proof_checked" }, "app-1", "example.org"),
+    "DNS proof alone granted a badge.");
+  assert(!canShowVerifiedBuilder({ ...claim, reviewerId: null }, "app-1", "example.org"),
+    "Claimant self-approval granted a badge.");
+  assert(!canShowVerifiedBuilder({ ...claim, revokedAt: new Date(now).toISOString() },
+    "app-1", "example.org"), "Revoked claim retained a badge.");
+  assert(!canShowVerifiedBuilder(claim, "app-1", "changed.org"),
+    "Changed official domain retained prior verification.");
+  return "proof, moderation, canonical domain and revocation gates remain separate.";
+});
+
+await check("Builder moderation transitions reject premature, disputed and stale approvals", () => {
+  const now = Date.now();
+  const claim = {
+    appId: "app-1", proofHostname: "example.org", status: "proof_checked",
+    proofCheckedAt: new Date(now - 60_000).toISOString(),
+    reviewedAt: null, reviewerId: null, revokedAt: null
+  };
+  const input = {
+    claim, appId: "app-1", officialHostname: "example.org",
+    decision: "approve", reviewerId: "moderator-1",
+    decidedAt: new Date(now).toISOString()
+  };
+  assert(planClaimDecision(input)?.status === "approved", "Proven claim could not be approved.");
+  assert(!planClaimDecision({ ...input, claim: { ...claim, status: "pending" } }),
+    "Unproven pending claim was approved.");
+  assert(!planClaimDecision({ ...input, reviewerId: "" }),
+    "Decision without a reviewer was accepted.");
+  assert(!planClaimDecision({ ...input, officialHostname: "attacker.org" }),
+    "Proof for an old or attacker-controlled domain was approved.");
+  assert(!planClaimDecision({ ...input, claim: { ...claim, status: "disputed" } }),
+    "Disputed claim was reapproved without fresh proof.");
+  assert(planClaimDecision({ ...input, claim: { ...claim, status: "approved" },
+    decision: "revoke" })?.revoked_at === input.decidedAt,
+  "Approved claim could not be revoked.");
+  return "approval requires proof and a reviewer; disputes require new proof, revocation is explicit.";
+});
+
+await check("Builder claim migration keeps requests private and audit records append-only", () => {
+  const sql = fs.readFileSync(path.join(rootDir,
+    "supabase/migrations/20261024053655_builder_claim_review_boundary.sql"), "utf8");
+  assert(sql.includes("alter table public.builder_claims enable row level security;"),
+    "Claims table does not enable RLS.");
+  assert(sql.includes("alter table public.builder_claim_audit enable row level security;"),
+    "Audit table does not enable RLS.");
+  assert(sql.includes("revoke all on table public.builder_claims from public, anon, authenticated, service_role;"),
+    "Claims table retains broad grants.");
+  assert(sql.includes("revoke all on table public.builder_claim_audit from public, anon, authenticated, service_role;"),
+    "Audit table retains broad grants.");
+  assert(sql.includes("grant select, insert, update on table public.builder_claims to service_role;"),
+    "Service role claim permissions are not restricted to review operations.");
+  assert(sql.includes("grant select on table public.builder_claim_audit to service_role;"),
+    "Audit table grants more than read access to the service role.");
+  assert(!/create policy/i.test(sql), "Private claim tables must not get public RLS policies.");
+  assert(sql.includes("builder_claims_active_contact_idx") &&
+    sql.includes("builder_claims_one_approved_per_app_idx"),
+  "Concurrent duplicate claim and approved-owner constraints are missing.");
+  assert(sql.includes("create schema if not exists base_radar_private;") &&
+    sql.includes("security definer") &&
+    sql.includes("revoke all on schema base_radar_private from public, anon, authenticated, service_role;") &&
+    sql.includes("revoke all on function base_radar_private.record_builder_claim_transition() from public, anon, authenticated, service_role;"),
+  "Privileged audit trigger is reachable through an exposed schema.");
+  assert(sql.includes("after insert or update of status, proof_checked_at, reviewed_at, reviewed_by, revoked_at") &&
+    sql.includes("on public.builder_claims"),
+  "Claim proof, review or revocation transitions are not audited.");
+  assert(!/\b(?:token_digest|claimant_contact|txtRecords)\b/.test(
+    sql.split("create table if not exists public.builder_claim_audit (")[1]?.split(");")[0] ?? ""),
+  "Audit table contains challenge or contact material.");
+  const auditOrderSql = fs.readFileSync(path.join(rootDir,
+    "supabase/migrations/20261024053822_builder_claim_audit_order.sql"), "utf8");
+  assert(auditOrderSql.includes("audit_seq bigint generated always as identity") &&
+    auditOrderSql.includes("builder_claim_audit_seq_idx"),
+  "Audit events cannot be reliably ordered within one transaction.");
+  return "RLS, restricted grants, unique indexes and secret-free transition audit are defined.";
+});
 
 await check("Growth is not calculated from missing baseline", () => {
   assert(calculateGrowth(100, null) === null, "Null previous value should return null.");

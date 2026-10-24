@@ -1228,6 +1228,16 @@ Production recommendation:
 - App comparison requires two saved, public apps with recent snapshots from the same metric source and measurement method, medium-or-better confidence/coverage, and available reliable observations. Incompatible metrics show a reason instead of a fabricated zero or ratio.
 - Coin watchlisting does not endorse a token or provide an investment recommendation. The watchlist stores only public slugs, contract addresses and display names, up to 100 items.
 
+## Builder Claim Verification Boundary
+
+The current `Claim app` entry point is a **manual listing review request** through `/submit?claim=<slug>`. It does not verify builder identity, grant listing ownership, or display a verified-builder badge. The submitted contact is not proof; the slug only pre-fills the form. Moderators must not treat an approved listing submission as an approved ownership claim.
+
+Before verified builder profiles go live, use a separate claim record bound to an existing approved app ID and its stored canonical website domain, not a domain supplied in the claim. A short-lived, single-use DNS TXT challenge can demonstrate domain control; store only a challenge hash and expiry. Domain control alone is still insufficient: a moderator must cross-check official project references and approve the claim. Keep pending, proof-checked, approved, rejected, disputed, and revoked states distinct. Revocation immediately removes any public verification signal.
+
+`supabase/migrations/20261024053655_builder_claim_review_boundary.sql` defines private claim and transition-audit tables with RLS, no public policies, service-role-only claim writes, append-only audit writes, and unique active-contact/approved-owner constraints. Its privileged audit trigger lives in an unexposed schema. `20261024053822_builder_claim_audit_order.sql` adds an ordered audit sequence; timestamps alone cannot order events within one transaction. Both migrations were applied to the Base Radar Supabase project on 2026-10-24. Live checks confirmed restricted grants, no public policies, a blocked duplicate active claim, and correctly ordered create/proof/approval/revocation audit events. Synthetic writes were rolled back; no claim data remains. The Supabase advisor's `rls_enabled_no_policy` info notice is intentional for these private tables.
+
+The database boundary is ready, **not** an active claim API. The app currently does not create challenge rows, call the DNS checker from a route, authenticate moderators, write decisions, or display a badge. `lib/claims/dns.ts` provides a bounded, fail-closed TXT lookup for the stored official domain; `lib/claims/moderation.ts` validates proposed state transitions but does not authenticate reviewers or write to the database. Tests cover exact-domain challenge matching, expiry/replay, DNS failures, moderator decision rules, domain changes and revocation. Do not log challenge values or private contacts. Before enabling a badge, verify forged-contact attempts, authenticated moderation, live anon access denial, proof-without-approval and dispute handling end to end.
+
 ## Architecture
 
 - UI reads app data through `lib/data.ts` only.

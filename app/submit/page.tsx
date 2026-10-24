@@ -17,7 +17,10 @@ interface SubmitPageProps {
 
 export default async function SubmitPage({ searchParams }: SubmitPageProps) {
   const resolvedSearchParams = await searchParams;
-  const claimSlug = resolvedSearchParams?.claim ?? "";
+  const requestedSlug = resolvedSearchParams?.claim ?? "";
+  const claimSlug = /^[a-z0-9][a-z0-9-]{0,79}$/.test(requestedSlug)
+    ? requestedSlug
+    : "";
 
   return (
     <>
@@ -30,12 +33,13 @@ export default async function SubmitPage({ searchParams }: SubmitPageProps) {
               Manual review pipeline
             </p>
             <h1 className="text-4xl font-semibold tracking-normal text-white sm:text-5xl">
-              Submit or claim a Base app.
+              Submit a Base app for review.
             </h1>
             <p className="mt-4 max-w-2xl text-base leading-7 text-muted-foreground">
               Add the app, contracts, social links, and builder context needed for
               review. Apps are manually reviewed before approval; contract addresses
               and Builder Codes are verified before metrics are tracked.
+              A listing review does not establish builder ownership.
             </p>
             <div className="mt-6 grid gap-3 text-sm text-muted-foreground md:grid-cols-3">
               <div className="rounded-lg border border-white/10 bg-white/[0.035] p-4">

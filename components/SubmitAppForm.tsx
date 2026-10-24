@@ -48,7 +48,7 @@ export function SubmitAppForm({ claimSlug = "" }: SubmitAppFormProps) {
       appName: current.appName || claimSlug.replaceAll("-", " "),
       description:
         current.description ||
-        `I want to claim or update the Base Radar listing for ${claimSlug}.`
+        `I request a manual listing review for ${claimSlug}. I can provide official project evidence for moderator review.`
     }));
   }, [claimSlug]);
 
@@ -131,6 +131,7 @@ export function SubmitAppForm({ claimSlug = "" }: SubmitAppFormProps) {
               <p className="mt-2 text-sm leading-6 text-emerald-50/80">
                 We will verify the website, category, contract addresses, and Builder
                 Code evidence before the app is approved or metrics are promoted.
+                {claimSlug ? " This submission does not verify builder ownership." : ""}
               </p>
             </div>
           </div>
@@ -158,10 +159,11 @@ export function SubmitAppForm({ claimSlug = "" }: SubmitAppFormProps) {
         <div className="flex items-start gap-3 rounded-lg border border-primary/25 bg-primary/10 p-4 text-sm text-blue-100">
           <FileCheck2 className="mt-0.5 h-5 w-5 shrink-0" />
           <div>
-            <p className="font-medium text-white">Claim flow started for {claimSlug}</p>
+            <p className="font-medium text-white">Request listing review for {claimSlug}</p>
             <p className="mt-1 leading-6">
-              Add a contact we can verify and include official docs, deployment links,
-              or Basescan references in the contract field.
+              This is a manual review request, not a verified ownership claim.
+              Include official docs or deployment references in the description;
+              the contract field accepts Ethereum addresses only.
             </p>
           </div>
         </div>

@@ -19,7 +19,7 @@ export function ClaimAppPanel({ app }: ClaimAppPanelProps) {
     <>
       <Button type="button" variant="secondary" onClick={() => setOpen(true)}>
         <FileCheck2 className="h-4 w-4" />
-        Claim app
+        Request claim review
       </Button>
 
       {open ? (
@@ -37,10 +37,10 @@ export function ClaimAppPanel({ app }: ClaimAppPanelProps) {
             <div className="flex items-start justify-between gap-4 border-b border-white/10 pb-4">
               <div>
                 <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
-                  Builder verification
+                  Listing review
                 </p>
                 <h2 id={titleId} className="mt-2 text-xl font-semibold text-white">
-                  Claim {app.name}
+                  Request review for {app.name}
                 </h2>
               </div>
               <button
@@ -58,15 +58,16 @@ export function ClaimAppPanel({ app }: ClaimAppPanelProps) {
                 <div className="flex items-start gap-2">
                   <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
                   <p>
-                    Claims require a verifiable builder contact plus official docs,
-                    verified Basescan links, or deployment references.
+                    This form requests manual review. It does not verify your
+                    identity or grant ownership of this listing.
                   </p>
                 </div>
               </div>
               <p>
-                Builder Codes are accepted only when the code is published or
-                verifiable from the project itself. We do not promote unverified
-                contracts into ranking metrics.
+                Explain your connection to the project in the description and
+                provide an official contact. A verified builder label requires
+                independent proof and moderator approval; neither is available
+                through this form yet.
               </p>
             </div>
 
@@ -75,7 +76,7 @@ export function ClaimAppPanel({ app }: ClaimAppPanelProps) {
                 href={`/submit?claim=${app.slug}`}
                 className={cn(buttonVariants(), "justify-center")}
               >
-                Continue claim
+                Submit review request
               </Link>
               <Button type="button" variant="secondary" onClick={() => setOpen(false)}>
                 Close
