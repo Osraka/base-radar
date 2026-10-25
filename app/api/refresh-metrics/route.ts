@@ -17,7 +17,7 @@ import { getBasePublicClient } from "@/lib/baseClient";
 import { attributeTransaction } from "@/lib/builderCodes/attribution";
 import { calculateBuilderCodeMetricsForApp } from "@/lib/builderCodes/metricsBridge";
 import { verifyRefreshRequest } from "@/lib/cronAuth";
-import { getRecentContractActivity } from "@/lib/indexer/baseActivity";
+import { getRecentContractActivity, shouldPauseContractScans } from "@/lib/indexer/baseActivity";
 import { readRecentBlockWindow } from "@/lib/indexer/blockWindow";
 import {
   RATE_LIMITED_ERROR,
@@ -668,7 +668,7 @@ async function handleRefresh(request: Request) {
     let baseRpcFailures = 0;
     let metricPersistenceFailures = 0;
     let appProcessingFailures = 0;
-    const skipped = Math.max(
+    let skipped = Math.max(
       0,
       (appRows?.length ?? 0) - approvedApps.length - adapterOnlyApps.length
     );
@@ -683,6 +683,7 @@ async function handleRefresh(request: Request) {
     let tokenSnapshotRows = 0;
     let tokenSnapshotErrors = 0;
     const socialFailedAppIds = new Set<string>();
+    let contractScansPaused = false;
 
     for (const app of approvedApps) {
       try {
@@ -691,7 +692,11 @@ async function handleRefresh(request: Request) {
           name: app.name,
           builderCode: app.builder_code
         });
-        const activityPromise = latestBlock === null || fromBlock === null
+        const activityPromise = contractScansPaused
+          ? Promise.reject(Object.assign(new Error("Contract scans paused for this run."), {
+              name: "BaseRpcScanPaused"
+            }))
+          : latestBlock === null || fromBlock === null
           ? Promise.reject(Object.assign(new Error("Base RPC latest block unavailable."), {
               name: "BaseRpcUnavailableError"
             }))
@@ -706,6 +711,12 @@ async function handleRefresh(request: Request) {
           activityPromise,
           socialPromise
         ]);
+        if (activityResult.status === "rejected" && shouldPauseContractScans(activityResult.reason)) {
+          contractScansPaused = true;
+          console.warn("[base-indexer] pausing remaining contract scans", {
+            rpcCode: -32011
+          });
+        }
         if (socialResult.status === "rejected") {
           throw socialResult.reason;
         }
@@ -755,14 +766,18 @@ async function handleRefresh(request: Request) {
             });
           }
         } else {
-          failed += 1;
-          baseRpcFailures += 1;
-          console.warn("[base-indexer] contract sample unavailable", {
-            slug: app.slug,
-            error: activityResult.reason instanceof Error
-              ? activityResult.reason.name
-              : "UnknownIndexerError"
-          });
+          if (activityResult.reason instanceof Error && activityResult.reason.name === "BaseRpcScanPaused") {
+            skipped += 1;
+          } else {
+            failed += 1;
+            baseRpcFailures += 1;
+            console.warn("[base-indexer] contract sample unavailable", {
+              slug: app.slug,
+              error: activityResult.reason instanceof Error
+                ? activityResult.reason.name
+                : "UnknownIndexerError"
+            });
+          }
         }
 
         // A short contract-log sample cannot supply an adapter's 24h TX or wallet fields.

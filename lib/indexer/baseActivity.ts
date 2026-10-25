@@ -22,6 +22,14 @@ export interface ContractActivityResult {
   toBlock: string;
 }
 
+type ContractActivityScanError = Error & { rpcCode?: number };
+
+export function shouldPauseContractScans(error: unknown) {
+  return error instanceof Error &&
+    error.name === "ContractActivityScanIncomplete" &&
+    (error as ContractActivityScanError).rpcCode === -32011;
+}
+
 function toAddress(value: string): Address | null {
   const normalized = value.trim().toLowerCase();
   return isAddress(normalized) ? (normalized as Address) : null;
@@ -80,14 +88,16 @@ export async function getRecentContractActivity(
     try {
       logs = await client.getLogs({ address, fromBlock, toBlock });
     } catch (error) {
+      const diagnostic = safeRpcErrorDiagnostic(error);
       console.warn("[base-indexer] contract log scan failed", {
         address,
         fromBlock: fromBlock.toString(),
         toBlock: toBlock.toString(),
-        ...safeRpcErrorDiagnostic(error)
+        ...diagnostic
       });
-      const scanError = new Error("Contract activity RPC scan failed.");
+      const scanError = new Error("Contract activity RPC scan failed.") as ContractActivityScanError;
       scanError.name = "ContractActivityScanIncomplete";
+      scanError.rpcCode = diagnostic.rpcCode;
       throw scanError;
     }
 

@@ -27,6 +27,11 @@ function loadModule(filename, overrides = {}) {
 }
 
 const baseClient = loadModule(fileURLToPath(new URL("../lib/baseClient.ts", import.meta.url)));
+const constants = loadModule(fileURLToPath(new URL("../lib/constants.ts", import.meta.url)));
+const baseActivity = loadModule(
+  fileURLToPath(new URL("../lib/indexer/baseActivity.ts", import.meta.url)),
+  { "@/lib/baseClient": baseClient, "@/lib/constants": constants }
+);
 const { readRecentBlockWindow } = loadModule(
   fileURLToPath(new URL("../lib/indexer/blockWindow.ts", import.meta.url)),
   { "@/lib/baseClient": baseClient }
@@ -69,4 +74,38 @@ assert.equal(
   "RPC URLs must not appear in diagnostics."
 );
 
-process.stdout.write("PASS: Base RPC fallback and numeric diagnostics are bounded and redacted.\n");
+const originalClient = baseClient.getBasePublicClient;
+const originalWarn = console.warn;
+try {
+  console.warn = () => {};
+  for (const code of [-32011, -32005]) {
+    baseClient.getBasePublicClient = () => ({
+      getLogs: async () => {
+        throw Object.assign(new Error("secret RPC response"), {
+          name: "RpcRequestError",
+          code,
+          url: "https://private-rpc.example/key"
+        });
+      }
+    });
+    await assert.rejects(
+      baseActivity.getRecentContractActivity(
+        ["0xA238Dd80C259a72e81d7e4664a9801593F98d1c5"],
+        { fromBlock: 1n, toBlock: 5n }
+      ),
+      (error) => {
+        assert.equal(error.name, "ContractActivityScanIncomplete");
+        assert.equal(error.rpcCode, code);
+        assert.equal(baseActivity.shouldPauseContractScans(error), code === -32011);
+        assert(!JSON.stringify(error).includes("private-rpc"));
+        return true;
+      }
+    );
+  }
+  assert.equal(baseActivity.shouldPauseContractScans(new Error("ordinary failure")), false);
+} finally {
+  baseClient.getBasePublicClient = originalClient;
+  console.warn = originalWarn;
+}
+
+process.stdout.write("PASS: Base RPC failures are redacted and repeated -32011 scans can be paused.\n");
