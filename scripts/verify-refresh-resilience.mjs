@@ -74,6 +74,20 @@ assert.equal(
   "RPC URLs must not appear in diagnostics."
 );
 
+const originalRpcUrl = process.env.BASE_RPC_URL;
+try {
+  process.env.BASE_RPC_URL = "https://base-mainnet.g.alchemy.com/v2/private-key";
+  assert.equal(baseClient.getBaseRpcProviderKind(), "alchemy");
+  process.env.BASE_RPC_URL = "https://base-mainnet.quiknode.pro/private-key";
+  assert.equal(baseClient.getBaseRpcProviderKind(), "quicknode");
+  process.env.BASE_RPC_URL = "https://private-rpc.example/private-key";
+  assert.equal(baseClient.getBaseRpcProviderKind(), "other");
+  assert(!baseClient.getBaseRpcProviderKind().includes("private-key"));
+} finally {
+  if (originalRpcUrl === undefined) delete process.env.BASE_RPC_URL;
+  else process.env.BASE_RPC_URL = originalRpcUrl;
+}
+
 const originalClient = baseClient.getBasePublicClient;
 const originalWarn = console.warn;
 try {

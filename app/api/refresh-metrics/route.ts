@@ -13,7 +13,7 @@ import {
 import { getProtocolAdapter, getProtocolAdapterSlugs } from "@/lib/adapters";
 import { isMetricReliable } from "@/lib/adapters/base";
 import type { AdapterMetrics } from "@/lib/adapters/types";
-import { getBasePublicClient } from "@/lib/baseClient";
+import { getBasePublicClient, getBaseRpcProviderKind } from "@/lib/baseClient";
 import { attributeTransaction } from "@/lib/builderCodes/attribution";
 import { calculateBuilderCodeMetricsForApp } from "@/lib/builderCodes/metricsBridge";
 import { verifyRefreshRequest } from "@/lib/cronAuth";
@@ -714,7 +714,8 @@ async function handleRefresh(request: Request) {
         if (activityResult.status === "rejected" && shouldPauseContractScans(activityResult.reason)) {
           contractScansPaused = true;
           console.warn("[base-indexer] pausing remaining contract scans", {
-            rpcCode: -32011
+            rpcCode: -32011,
+            providerKind: getBaseRpcProviderKind()
           });
         }
         if (socialResult.status === "rejected") {

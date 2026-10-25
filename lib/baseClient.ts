@@ -38,6 +38,19 @@ export function isBaseRpcConfigured() {
   return Boolean(process.env.BASE_RPC_URL?.trim());
 }
 
+export function getBaseRpcProviderKind() {
+  const rpcUrl = parseRpcUrl(process.env.BASE_RPC_URL?.trim() ?? "");
+
+  if (!rpcUrl) return "unknown";
+
+  const hostname = new URL(rpcUrl).hostname.toLowerCase();
+
+  if (hostname.endsWith(".quiknode.pro")) return "quicknode";
+  if (hostname.endsWith(".alchemy.com")) return "alchemy";
+  if (hostname === "mainnet.base.org") return "base-public";
+  return "other";
+}
+
 export function createBasePublicClient() {
   const rpcUrl = parseRpcUrl(process.env.BASE_RPC_URL?.trim() ?? "");
 
