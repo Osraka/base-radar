@@ -6,7 +6,7 @@ import {
   MAX_BLOCK_SCAN_RANGE,
   MAX_INDEXER_LOGS_PER_APP
 } from "@/lib/constants";
-import { getBasePublicClient, safeRpcErrorName } from "@/lib/baseClient";
+import { getBasePublicClient, safeRpcErrorDiagnostic } from "@/lib/baseClient";
 
 export interface ContractActivityOptions {
   fromBlock?: bigint;
@@ -84,7 +84,7 @@ export async function getRecentContractActivity(
         address,
         fromBlock: fromBlock.toString(),
         toBlock: toBlock.toString(),
-        error: safeRpcErrorName(error)
+        ...safeRpcErrorDiagnostic(error)
       });
       const scanError = new Error("Contract activity RPC scan failed.");
       scanError.name = "ContractActivityScanIncomplete";

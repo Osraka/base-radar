@@ -59,3 +59,42 @@ export function getBasePublicClient(): BasePublicClient {
 export function safeRpcErrorName(error: unknown) {
   return error instanceof Error ? error.name : "UnknownRpcError";
 }
+
+export function safeRpcErrorDiagnostic(error: unknown) {
+  const diagnostic: {
+    error: string;
+    rpcCode?: number;
+    httpStatus?: number;
+  } = { error: safeRpcErrorName(error) };
+  let current = error;
+
+  for (let depth = 0; depth < 4 && current instanceof Error; depth += 1) {
+    const candidate = current as Error & {
+      code?: unknown;
+      status?: unknown;
+      cause?: unknown;
+    };
+
+    if (
+      current.name === "RpcRequestError" &&
+      typeof candidate.code === "number" &&
+      Number.isSafeInteger(candidate.code)
+    ) {
+      diagnostic.rpcCode = candidate.code;
+    }
+
+    if (
+      current.name === "HttpRequestError" &&
+      typeof candidate.status === "number" &&
+      Number.isInteger(candidate.status) &&
+      candidate.status >= 100 &&
+      candidate.status <= 599
+    ) {
+      diagnostic.httpStatus = candidate.status;
+    }
+
+    current = candidate.cause;
+  }
+
+  return diagnostic;
+}
