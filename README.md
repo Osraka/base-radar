@@ -874,6 +874,7 @@ The refresh job can now collect conservative real onchain activity from Base usi
 What it does:
 
 - Uses a server-only viem Base public client from `BASE_RPC_URL`.
+- Base's shared `https://mainnet.base.org` endpoint is rate-limited and unsuitable for production log indexing. In production, contract-log scans are skipped when this endpoint is configured; protocol adapters continue and the refresh response/run notes explain the limited coverage. This does not disable other Base RPC features.
 - Reads recent logs for each approved app contract.
 - Scans only a small bounded block range.
 - Counts logs and distinct transaction hashes as a bounded diagnostic sample. Indexed event topics are not counted as users.
@@ -891,6 +892,7 @@ MAX_INDEXER_APPS_PER_RUN=20
 Safety limits:
 
 - Default scan range: 1,000 recent Base blocks.
+- This range applies only when contract-log scans are enabled for the configured provider; reducing it to five blocks did not resolve the public endpoint's observed `-32011` rejection.
 - Hard max scan range: 2,000 blocks.
 - Default app limit per run: 20 approved apps.
 - Apps with invalid contract addresses or too many contract addresses are skipped.

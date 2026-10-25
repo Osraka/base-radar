@@ -13,7 +13,11 @@ import {
 import { getProtocolAdapter, getProtocolAdapterSlugs } from "@/lib/adapters";
 import { isMetricReliable } from "@/lib/adapters/base";
 import type { AdapterMetrics } from "@/lib/adapters/types";
-import { getBasePublicClient, getBaseRpcProviderKind } from "@/lib/baseClient";
+import {
+  getBasePublicClient,
+  getBaseRpcProviderKind,
+  shouldSkipProductionContractLogScans
+} from "@/lib/baseClient";
 import { attributeTransaction } from "@/lib/builderCodes/attribution";
 import { calculateBuilderCodeMetricsForApp } from "@/lib/builderCodes/metricsBridge";
 import { verifyRefreshRequest } from "@/lib/cronAuth";
@@ -62,6 +66,7 @@ type RefreshTriggerType = (typeof REFRESH_TRIGGER_TYPES)[number];
 interface RefreshSummary {
   ok: boolean;
   mode: "full" | "fast";
+  warnings: string[];
   processedApps: number;
   baseRpcMetricsInserted: number;
   protocolAdapterMetricsInserted: number;
@@ -218,6 +223,7 @@ async function completeRefreshRun(input: {
       : "success";
   const failures = input.summary.sourceFailures;
   const failureNotes = `base_rpc=${failures.baseRpc}, metric_persistence=${failures.metricPersistence}, app_processing=${failures.appProcessing}, protocol_adapters=${failures.protocolAdapters}, builder_codes=${failures.builderCodes}, social=${failures.social}, token_snapshots=${failures.tokenSnapshots}`;
+  const coverageNote = input.summary.warnings.join(" ");
 
   const { error } = await input.supabase
     .from("refresh_runs")
@@ -233,10 +239,10 @@ async function completeRefreshRun(input: {
       errors: input.summary.errors,
       duration_ms: Math.max(0, Math.round(input.durationMs)),
       notes: status === "success"
-        ? "Refresh completed successfully."
+        ? `Refresh completed successfully. ${coverageNote}`.trim()
         : status === "failed"
-          ? "Refresh completed without inserting any metrics."
-          : `Refresh completed with isolated source failures: ${failureNotes}.`
+          ? `Refresh completed without inserting any metrics. ${coverageNote}`.trim()
+          : `Refresh completed with isolated source failures: ${failureNotes}. ${coverageNote}`.trim()
     })
     .eq("id", input.refreshRunId);
 
@@ -649,7 +655,8 @@ async function handleRefresh(request: Request) {
           batchNow
         )
       : adapterOnlyCandidates.slice(0, maxApps);
-    const blockWindow = approvedApps.length > 0
+    const publicRpcLogScansDisabled = shouldSkipProductionContractLogScans();
+    const blockWindow = approvedApps.length > 0 && !publicRpcLogScansDisabled
       ? await readRecentBlockWindow(
           () => getBasePublicClient().getBlockNumber(),
           blockRange
@@ -693,7 +700,11 @@ async function handleRefresh(request: Request) {
           name: app.name,
           builderCode: app.builder_code
         }, { requestBudget: socialRequestBudget });
-        const activityPromise = contractScansPaused
+        const activityPromise = publicRpcLogScansDisabled
+          ? Promise.reject(Object.assign(new Error("Public Base RPC contract scans are disabled."), {
+              name: "BaseRpcPublicEndpointSkipped"
+            }))
+          : contractScansPaused
           ? Promise.reject(Object.assign(new Error("Contract scans paused for this run."), {
               name: "BaseRpcScanPaused"
             }))
@@ -768,7 +779,10 @@ async function handleRefresh(request: Request) {
             });
           }
         } else {
-          if (activityResult.reason instanceof Error && activityResult.reason.name === "BaseRpcScanPaused") {
+          if (
+            activityResult.reason instanceof Error &&
+            ["BaseRpcScanPaused", "BaseRpcPublicEndpointSkipped"].includes(activityResult.reason.name)
+          ) {
             skipped += 1;
           } else {
             failed += 1;
@@ -993,6 +1007,7 @@ async function handleRefresh(request: Request) {
       newlyDiscoveredCount: tokenSnapshotRows,
       measuredAt,
       mode: fastMode ? "fast" : "full",
+      contractLogScanStatus: publicRpcLogScansDisabled ? "public_endpoint_skipped" : contractScansPaused ? "provider_rejected" : "enabled",
       fromBlock: fromBlock?.toString() ?? null,
       toBlock: latestBlock?.toString() ?? null
     });
@@ -1000,6 +1015,11 @@ async function handleRefresh(request: Request) {
     const summary: RefreshSummary = {
       ok: refreshed + protocolAdapterMetricRows + builderCodeMetricRows > 0,
       mode: fastMode ? "fast" : "full",
+      warnings: publicRpcLogScansDisabled
+        ? ["Contract-log scans were skipped because the public Base RPC is rate-limited for production use; protocol adapters continued."]
+        : contractScansPaused
+          ? ["Contract-log scans were paused after a provider rejection; protocol adapters continued."]
+          : [],
       processedApps: approvedApps.length + adapterOnlyApps.length,
       baseRpcMetricsInserted: refreshed,
       protocolAdapterMetricsInserted: protocolAdapterMetricRows,

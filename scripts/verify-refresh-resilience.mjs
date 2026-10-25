@@ -75,6 +75,7 @@ assert.equal(
 );
 
 const originalRpcUrl = process.env.BASE_RPC_URL;
+const originalNodeEnv = process.env.NODE_ENV;
 try {
   process.env.BASE_RPC_URL = "https://base-mainnet.g.alchemy.com/v2/private-key";
   assert.equal(baseClient.getBaseRpcProviderKind(), "alchemy");
@@ -83,9 +84,20 @@ try {
   process.env.BASE_RPC_URL = "https://private-rpc.example/private-key";
   assert.equal(baseClient.getBaseRpcProviderKind(), "other");
   assert(!baseClient.getBaseRpcProviderKind().includes("private-key"));
+
+  process.env.NODE_ENV = "production";
+  process.env.BASE_RPC_URL = "https://mainnet.base.org";
+  assert.equal(baseClient.shouldSkipProductionContractLogScans(), true);
+  process.env.BASE_RPC_URL = "https://base-mainnet.quiknode.pro/private-key";
+  assert.equal(baseClient.shouldSkipProductionContractLogScans(), false);
+  process.env.NODE_ENV = "development";
+  process.env.BASE_RPC_URL = "https://mainnet.base.org";
+  assert.equal(baseClient.shouldSkipProductionContractLogScans(), false);
 } finally {
   if (originalRpcUrl === undefined) delete process.env.BASE_RPC_URL;
   else process.env.BASE_RPC_URL = originalRpcUrl;
+  if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+  else process.env.NODE_ENV = originalNodeEnv;
 }
 
 const originalClient = baseClient.getBasePublicClient;

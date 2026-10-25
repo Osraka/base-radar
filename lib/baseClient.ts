@@ -51,6 +51,10 @@ export function getBaseRpcProviderKind() {
   return "other";
 }
 
+export function shouldSkipProductionContractLogScans() {
+  return process.env.NODE_ENV === "production" && getBaseRpcProviderKind() === "base-public";
+}
+
 export function createBasePublicClient() {
   const rpcUrl = parseRpcUrl(process.env.BASE_RPC_URL?.trim() ?? "");
 
