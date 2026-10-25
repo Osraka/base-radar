@@ -277,16 +277,20 @@ export function isSocialDataUnavailable(metric: AppMetrics) {
     (notes.includes("neynar cast search unavailable") ||
       notes.includes("neynar api key is not configured") ||
       notes.includes("social metric fetch failed") ||
-      notes.includes("social data temporarily unavailable"))
+      notes.includes("social data temporarily unavailable") ||
+      notes.includes("partial neynar cast search coverage"))
   );
 }
 
 export function getSocialDisplayState(metric: AppMetrics) {
   if (isSocialDataUnavailable(metric)) {
+    const isPartial = metric.notes?.toLowerCase().includes("partial neynar cast search coverage");
     return {
       showNumeric: false,
-      value: "Social data temporarily unavailable",
-      caption: "Neynar/Farcaster social sampling is unavailable for this refresh."
+      value: isPartial ? "Social data incomplete" : "Social data temporarily unavailable",
+      caption: isPartial
+        ? "Some Neynar searches failed; zero is not a verified mention count."
+        : "Neynar/Farcaster social sampling is unavailable for this refresh."
     };
   }
 

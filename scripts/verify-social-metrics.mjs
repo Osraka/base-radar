@@ -109,6 +109,10 @@ function assertSocialShape(metrics) {
   assert(metrics.source === "farcaster", "source must be farcaster.");
   assert(metrics.window === "7d", "social window must be 7d.");
   assert(validConfidence.has(metrics.confidence), "Invalid confidence.");
+  assert(
+    ["complete", "partial", "unavailable", "skipped"].includes(metrics.availability),
+    "Invalid social availability."
+  );
 
   if (metrics.engagement7d !== undefined) {
     assert(metrics.engagement7d >= 0, "engagement7d must be non-negative.");
@@ -217,6 +221,7 @@ await check("Missing Neynar key fails gracefully", async () => {
   assertSocialShape(metrics);
   assert(metrics.mentions7d === 0, "Missing key should not fabricate mentions.");
   assert(metrics.confidence === "low", "Missing key should remain low confidence.");
+  assert(metrics.availability === "unavailable", "Missing key must be unavailable.");
   return metrics.notes ?? "fallback ok.";
 });
 
@@ -258,6 +263,7 @@ await check("Authorization failure stops alias retries and stays unavailable", a
     );
     assert(attempts === 1, "A bad key should not retry every alias.");
     assert(metrics.mentions7d === 0 && metrics.confidence === "low", "Failed search must not invent mentions.");
+    assert(metrics.availability === "unavailable", "Failed search must be unavailable.");
     assert(isSocialDataUnavailable({ ...metrics, socialSource: "farcaster",
       socialConfidence: metrics.confidence, socialMentions7d: metrics.mentions7d }),
     "An authorization failure must be displayed as unavailable.");
@@ -278,10 +284,70 @@ await check("A successful empty sample is not mislabeled as an outage", async ()
     );
     const displayMetric = { ...metrics, socialSource: "farcaster",
       socialConfidence: metrics.confidence, socialMentions7d: metrics.mentions7d };
+    assert(metrics.availability === "complete", "Successful empty search must be complete.");
     assert(!isSocialDataUnavailable(displayMetric), "Successful zero-match search is not an outage.");
     assert(getSocialDisplayState(displayMetric).value === "No matched Farcaster casts in this sample",
       "Zero-match copy should explain the bounded sample.");
     return "zero matched casts, low confidence, bounded-sample copy.";
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+await check("Partial search is not presented as verified zero activity", async () => {
+  const originalFetch = global.fetch;
+  let attempts = 0;
+  try {
+    global.fetch = async () => {
+      attempts += 1;
+      if (attempts === 1) {
+        return { ok: true, status: 200, json: async () => ({ result: { casts: [] } }) };
+      }
+      throw new Error("test network failure");
+    };
+    const metrics = await getFarcasterMetricsForApp(
+      { slug: "aerodrome", name: "Aerodrome" },
+      { apiKey: "test-only", limit: 1, now: new Date("2026-10-25T00:00:00Z") }
+    );
+    const displayMetric = {
+      ...metrics,
+      socialSource: "farcaster",
+      socialConfidence: metrics.confidence,
+      socialMentions7d: metrics.mentions7d,
+      notes: `Adapter source. Social: ${metrics.notes}`
+    };
+    assert(attempts === 2, "Both aliases should be attempted on a network error.");
+    assert(metrics.availability === "partial", "Mixed results must be partial.");
+    assert(metrics.mentions7d === 0, "No matched casts should remain zero internally.");
+    assert(isSocialDataUnavailable(displayMetric), "Partial zero must be hidden from display.");
+    assert(getSocialDisplayState(displayMetric).value === "Social data incomplete",
+      "Partial coverage needs explicit copy.");
+    return "partial coverage is visible without claiming zero mentions.";
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+await check("Timeout and network failures have safe distinct categories", async () => {
+  const originalFetch = global.fetch;
+  try {
+    global.fetch = async () => { throw new Error("test network failure"); };
+    const network = await fetchNeynarCastSearchResult('"Test network"', {
+      apiKey: "test-only",
+      limit: 1
+    });
+    assert(network.error === "network_error", "Network error must use a safe category.");
+
+    global.fetch = async (_url, options) => new Promise((_resolve, reject) => {
+      options.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+    });
+    const timeout = await fetchNeynarCastSearchResult('"Test timeout"', {
+      apiKey: "test-only",
+      timeoutMs: 1,
+      limit: 1
+    });
+    assert(timeout.error === "timeout", "Aborted request must be a timeout.");
+    return "network_error and timeout remain redacted and distinct.";
   } finally {
     global.fetch = originalFetch;
   }

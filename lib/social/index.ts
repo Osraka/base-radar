@@ -23,6 +23,7 @@ export async function getSocialMetricsForApp(
       confidence: "low",
       source: "farcaster",
       window: "7d",
+      availability: "unavailable",
       notes: "Farcaster social metric fetch failed gracefully."
     };
   }

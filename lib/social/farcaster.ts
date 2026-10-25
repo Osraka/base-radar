@@ -220,7 +220,7 @@ export async function fetchNeynarCastSearchResult(
     return {
       ok: false,
       response: null,
-      error: "fetch_failed"
+      error: controller.signal.aborted ? "timeout" : "network_error"
     };
   } finally {
     clearTimeout(timeout);
@@ -259,6 +259,7 @@ export async function getFarcasterMetricsForApp(
       confidence: "low",
       source: "farcaster",
       window: "7d",
+      availability: "skipped",
       notes: "No safe social aliases are configured for this app."
     };
   }
@@ -273,6 +274,7 @@ export async function getFarcasterMetricsForApp(
       confidence: "low",
       source: "farcaster",
       window: "7d",
+      availability: "unavailable",
       notes: "Neynar API key is not configured."
     };
   }
@@ -329,6 +331,15 @@ export async function getFarcasterMetricsForApp(
     matchedAliases: Array.from(matchedAliases)
   });
 
+  if (failedSearches.size > 0) {
+    console.warn("[social] app search incomplete", {
+      slug: app.slug,
+      successfulSearches,
+      attemptedAliases: aliases.length,
+      failureCategories: Array.from(failedSearches)
+    });
+  }
+
   if (MAJOR_SOCIAL_PROTOCOLS.has(app.slug) && seenCasts.size === 0) {
     console.warn("[social] unexpectedly low social coverage", {
       slug: app.slug,
@@ -352,6 +363,11 @@ export async function getFarcasterMetricsForApp(
       successfulSearches === aliases.length ? "medium" : "low",
     source: "farcaster",
     window: "7d",
+    availability: successfulSearches === 0
+      ? "unavailable"
+      : failedSearches.size > 0
+        ? "partial"
+        : "complete",
     notes:
       successfulSearches === 0
         ? `Neynar cast search unavailable (${Array.from(failedSearches).join(", ")}).`

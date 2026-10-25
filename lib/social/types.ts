@@ -9,6 +9,7 @@ export interface SocialMetrics {
   confidence: MetricConfidence;
   source: "farcaster";
   window: "7d";
+  availability: "complete" | "partial" | "unavailable" | "skipped";
   notes?: string;
 }
 

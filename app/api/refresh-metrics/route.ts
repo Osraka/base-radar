@@ -18,6 +18,7 @@ import { attributeTransaction } from "@/lib/builderCodes/attribution";
 import { calculateBuilderCodeMetricsForApp } from "@/lib/builderCodes/metricsBridge";
 import { verifyRefreshRequest } from "@/lib/cronAuth";
 import { getRecentContractActivity } from "@/lib/indexer/baseActivity";
+import { readRecentBlockWindow } from "@/lib/indexer/blockWindow";
 import {
   RATE_LIMITED_ERROR,
   rateLimitHeaders,
@@ -70,6 +71,15 @@ interface RefreshSummary {
   tokenSnapshotsInserted: number;
   skippedApps: number;
   errors: number;
+  sourceFailures: {
+    baseRpc: number;
+    metricPersistence: number;
+    appProcessing: number;
+    protocolAdapters: number;
+    builderCodes: number;
+    social: number;
+    tokenSnapshots: number;
+  };
   measuredAt: string;
   sourceSummary: {
     protocolAdapters: {
@@ -100,7 +110,9 @@ function sleep(ms: number) {
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
-      reject(new Error("Indexer app timeout."));
+      const error = new Error("Indexer app timeout.");
+      error.name = "IndexerTimeoutError";
+      reject(error);
     }, timeoutMs);
 
     promise
@@ -118,7 +130,10 @@ function toNumber(value: number | string | null | undefined) {
 }
 
 function withSocialNote(notes: string, socialMetrics: SocialMetrics) {
-  if (!socialMetrics.notes || socialMetrics.mentions7d > 0) {
+  if (
+    !socialMetrics.notes ||
+    (socialMetrics.availability === "complete" && socialMetrics.mentions7d > 0)
+  ) {
     return notes;
   }
 
@@ -201,6 +216,8 @@ async function completeRefreshRun(input: {
     : input.summary.errors > 0
       ? "partial_failure"
       : "success";
+  const failures = input.summary.sourceFailures;
+  const failureNotes = `base_rpc=${failures.baseRpc}, metric_persistence=${failures.metricPersistence}, app_processing=${failures.appProcessing}, protocol_adapters=${failures.protocolAdapters}, builder_codes=${failures.builderCodes}, social=${failures.social}, token_snapshots=${failures.tokenSnapshots}`;
 
   const { error } = await input.supabase
     .from("refresh_runs")
@@ -219,7 +236,7 @@ async function completeRefreshRun(input: {
         ? "Refresh completed successfully."
         : status === "failed"
           ? "Refresh completed without inserting any metrics."
-          : "Refresh completed with isolated app-level errors."
+          : `Refresh completed with isolated source failures: ${failureNotes}.`
     })
     .eq("id", input.refreshRunId);
 
@@ -632,12 +649,25 @@ async function handleRefresh(request: Request) {
           batchNow
         )
       : adapterOnlyCandidates.slice(0, maxApps);
-    const latestBlock = await getBasePublicClient().getBlockNumber();
-    const fromBlock =
-      latestBlock > BigInt(blockRange - 1) ? latestBlock - BigInt(blockRange - 1) : 0n;
+    const blockWindow = approvedApps.length > 0
+      ? await readRecentBlockWindow(
+          () => getBasePublicClient().getBlockNumber(),
+          blockRange
+        )
+      : null;
+    if (blockWindow && !blockWindow.available) {
+      console.warn("[base-indexer] latest block unavailable", {
+        error: blockWindow.errorName
+      });
+    }
+    const latestBlock = blockWindow?.available ? blockWindow.toBlock : null;
+    const fromBlock = blockWindow?.available ? blockWindow.fromBlock : null;
     const measuredAt = new Date().toISOString();
     let refreshed = 0;
     let failed = 0;
+    let baseRpcFailures = 0;
+    let metricPersistenceFailures = 0;
+    let appProcessingFailures = 0;
     const skipped = Math.max(
       0,
       (appRows?.length ?? 0) - approvedApps.length - adapterOnlyApps.length
@@ -649,8 +679,10 @@ async function handleRefresh(request: Request) {
     let protocolAdapterMetricRows = 0;
     let protocolAdapterErrors = 0;
     let socialTrendRows = 0;
+    let socialTrendErrors = 0;
     let tokenSnapshotRows = 0;
     let tokenSnapshotErrors = 0;
+    const socialFailedAppIds = new Set<string>();
 
     for (const app of approvedApps) {
       try {
@@ -659,13 +691,17 @@ async function handleRefresh(request: Request) {
           name: app.name,
           builderCode: app.builder_code
         });
-        const activityPromise = withTimeout(
-          getRecentContractActivity(app.contract_addresses ?? [], {
-            fromBlock,
-            toBlock: latestBlock
-          }),
-          INDEXER_APP_TIMEOUT_MS
-        );
+        const activityPromise = latestBlock === null || fromBlock === null
+          ? Promise.reject(Object.assign(new Error("Base RPC latest block unavailable."), {
+              name: "BaseRpcUnavailableError"
+            }))
+          : withTimeout(
+              getRecentContractActivity(app.contract_addresses ?? [], {
+                fromBlock,
+                toBlock: latestBlock
+              }),
+              INDEXER_APP_TIMEOUT_MS
+            );
         const [activityResult, socialResult] = await Promise.allSettled([
           activityPromise,
           socialPromise
@@ -674,6 +710,9 @@ async function handleRefresh(request: Request) {
           throw socialResult.reason;
         }
         const socialMetrics = socialResult.value;
+        if (socialMetrics.availability === "partial" || socialMetrics.availability === "unavailable") {
+          socialFailedAppIds.add(app.id);
+        }
 
         if (activityResult.status === "fulfilled") {
           try {
@@ -692,7 +731,15 @@ async function handleRefresh(request: Request) {
             }
 
             refreshed += 1;
-
+          } catch (error) {
+            failed += 1;
+            metricPersistenceFailures += 1;
+            console.warn("[base-indexer] sample persistence failed", {
+              slug: app.slug,
+              error: error instanceof Error ? error.name : "UnknownIndexerError"
+            });
+          }
+          try {
             const attributionSummary = await persistBuilderCodeAttributions({
               app,
               transactionHashes: activityResult.value.transactionHashes,
@@ -701,14 +748,15 @@ async function handleRefresh(request: Request) {
             builderCodeAttributions += attributionSummary.detected;
             builderCodeMatches += attributionSummary.matchedAppBuilderCode;
           } catch (error) {
-            failed += 1;
-            console.warn("[base-indexer] sample persistence failed", {
-              slug: app.slug,
-              error: error instanceof Error ? error.name : "UnknownIndexerError"
+            builderCodeBridgeErrors += 1;
+            console.warn("[builder-codes] attribution scan failed", {
+              appId: app.id,
+              error: error instanceof Error ? error.name : "UnknownAttributionError"
             });
           }
         } else {
           failed += 1;
+          baseRpcFailures += 1;
           console.warn("[base-indexer] contract sample unavailable", {
             slug: app.slug,
             error: activityResult.reason instanceof Error
@@ -757,6 +805,7 @@ async function handleRefresh(request: Request) {
 
       } catch (error) {
         failed += 1;
+        appProcessingFailures += 1;
         console.warn("[base-indexer] app refresh failed", {
           appId: app.id,
           slug: app.slug,
@@ -785,6 +834,9 @@ async function handleRefresh(request: Request) {
           }),
           adapter.getMetrics()
         ]);
+        if (socialMetrics.availability === "partial" || socialMetrics.availability === "unavailable") {
+          socialFailedAppIds.add(app.id);
+        }
 
         if (!isMetricReliable(adapterMetrics)) {
           console.info("[protocol-adapter] no reliable Base metric", {
@@ -842,14 +894,18 @@ async function handleRefresh(request: Request) {
           continue;
         }
 
+        const builderSocialMetrics = await getSocialMetricsForApp({
+          slug: app.slug,
+          name: app.name,
+          builderCode: app.builder_code
+        });
+        if (builderSocialMetrics.availability === "partial" || builderSocialMetrics.availability === "unavailable") {
+          socialFailedAppIds.add(app.id);
+        }
         const builderMetricRow = createBuilderCodeMetricRow(
           app,
           bridgeMetrics,
-          await getSocialMetricsForApp({
-            slug: app.slug,
-            name: app.name,
-            builderCode: app.builder_code
-          }),
+          builderSocialMetrics,
           measuredAt
         );
         const { error: builderMetricError } = await supabase
@@ -878,6 +934,7 @@ async function handleRefresh(request: Request) {
         const socialTrendSummary = await refreshBaseSocialTrends();
         socialTrendRows = socialTrendSummary.inserted;
       } catch (error) {
+        socialTrendErrors += 1;
         console.warn("[social-radar] refresh failed gracefully", {
           error: error instanceof Error ? error.name : "UnknownSocialRadarError"
         });
@@ -906,12 +963,21 @@ async function handleRefresh(request: Request) {
       refreshedCount: refreshed + protocolAdapterMetricRows + builderCodeMetricRows,
       skippedCount: skipped,
       failedCount:
-        failed + builderCodeBridgeErrors + protocolAdapterErrors + tokenSnapshotErrors,
+        failed + builderCodeBridgeErrors + protocolAdapterErrors + tokenSnapshotErrors + socialFailedAppIds.size + socialTrendErrors,
+      sourceFailures: {
+        baseRpc: baseRpcFailures,
+        metricPersistence: metricPersistenceFailures,
+        appProcessing: appProcessingFailures,
+        protocolAdapters: protocolAdapterErrors,
+        builderCodes: builderCodeBridgeErrors,
+        social: socialFailedAppIds.size + socialTrendErrors,
+        tokenSnapshots: tokenSnapshotErrors
+      },
       newlyDiscoveredCount: tokenSnapshotRows,
       measuredAt,
       mode: fastMode ? "fast" : "full",
-      fromBlock: fromBlock.toString(),
-      toBlock: latestBlock.toString()
+      fromBlock: fromBlock?.toString() ?? null,
+      toBlock: latestBlock?.toString() ?? null
     });
 
     const summary: RefreshSummary = {
@@ -924,7 +990,16 @@ async function handleRefresh(request: Request) {
       attributionsInserted: builderCodeAttributions,
       tokenSnapshotsInserted: tokenSnapshotRows,
       skippedApps: skipped,
-      errors: failed + builderCodeBridgeErrors + protocolAdapterErrors + tokenSnapshotErrors,
+      errors: failed + builderCodeBridgeErrors + protocolAdapterErrors + tokenSnapshotErrors + socialFailedAppIds.size + socialTrendErrors,
+      sourceFailures: {
+        baseRpc: baseRpcFailures,
+        metricPersistence: metricPersistenceFailures,
+        appProcessing: appProcessingFailures,
+        protocolAdapters: protocolAdapterErrors,
+        builderCodes: builderCodeBridgeErrors,
+        social: socialFailedAppIds.size + socialTrendErrors,
+        tokenSnapshots: tokenSnapshotErrors
+      },
       socialTrendsInserted: socialTrendRows,
       measuredAt,
       sourceSummary: {

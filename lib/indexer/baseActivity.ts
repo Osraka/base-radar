@@ -71,21 +71,14 @@ export async function getRecentContractActivity(
 
   for (const address of addresses) {
     if (logCount >= MAX_INDEXER_LOGS_PER_APP) {
-      throw new Error("ContractActivityScanIncomplete");
+      const error = new Error("Contract activity log budget exhausted.");
+      error.name = "ContractLogBudgetExceeded";
+      throw error;
     }
 
+    let logs;
     try {
-      const logs = await client.getLogs({ address, fromBlock, toBlock });
-      if (logCount + logs.length > MAX_INDEXER_LOGS_PER_APP) {
-        throw new Error("ContractLogBudgetExceeded");
-      }
-
-      logCount += logs.length;
-      for (const log of logs) {
-        if (log.transactionHash) {
-          transactionHashes.add(log.transactionHash.toLowerCase() as `0x${string}`);
-        }
-      }
+      logs = await client.getLogs({ address, fromBlock, toBlock });
     } catch (error) {
       console.warn("[base-indexer] contract log scan failed", {
         address,
@@ -93,7 +86,22 @@ export async function getRecentContractActivity(
         toBlock: toBlock.toString(),
         error: safeRpcErrorName(error)
       });
-      throw new Error("ContractActivityScanIncomplete");
+      const scanError = new Error("Contract activity RPC scan failed.");
+      scanError.name = "ContractActivityScanIncomplete";
+      throw scanError;
+    }
+
+    if (logCount + logs.length > MAX_INDEXER_LOGS_PER_APP) {
+      const error = new Error("Contract activity log budget exhausted.");
+      error.name = "ContractLogBudgetExceeded";
+      throw error;
+    }
+
+    logCount += logs.length;
+    for (const log of logs) {
+      if (log.transactionHash) {
+        transactionHashes.add(log.transactionHash.toLowerCase() as `0x${string}`);
+      }
     }
   }
 
