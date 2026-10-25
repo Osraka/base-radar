@@ -129,9 +129,55 @@ try {
     );
   }
   assert.equal(baseActivity.shouldPauseContractScans(new Error("ordinary failure")), false);
+
+  const calls = [];
+  const firstHash = `0x${"1".repeat(64)}`;
+  const secondHash = `0x${"2".repeat(64)}`;
+  baseClient.getBasePublicClient = () => ({
+    getLogs: async (query) => {
+      calls.push(query);
+      return query.fromBlock === 1n
+        ? [{ transactionHash: firstHash }]
+        : query.fromBlock === 101n
+          ? [{ transactionHash: firstHash }]
+          : [{ transactionHash: secondHash }];
+    }
+  });
+  const activity = await baseActivity.getRecentContractActivity(
+    [
+      "0xA238Dd80C259a72e81d7e4664a9801593F98d1c5",
+      "0xa238dd80c259a72e81d7e4664a9801593f98d1c5",
+      "0xb125E6687d4313864e53df431d5425969c15Eb2F"
+    ],
+    { fromBlock: 1n, toBlock: 205n, pageBlockLimit: 100 }
+  );
+  assert.deepEqual(calls.map(({ fromBlock, toBlock }) => [fromBlock, toBlock]), [
+    [1n, 100n],
+    [101n, 200n],
+    [201n, 205n]
+  ]);
+  assert(calls.every(({ address }) => address.length === 2));
+  assert.equal(activity.logCount, 3);
+  assert.equal(activity.txCount, 2);
+  assert.equal(activity.uniqueUsers, 0);
+
+  baseClient.getBasePublicClient = () => ({
+    getLogs: async ({ fromBlock }) => {
+      if (fromBlock > 1n) throw new Error("private second-page failure");
+      return [{ transactionHash: firstHash }];
+    }
+  });
+  await assert.rejects(
+    baseActivity.getRecentContractActivity(
+      ["0xA238Dd80C259a72e81d7e4664a9801593F98d1c5"],
+      { fromBlock: 1n, toBlock: 205n, pageBlockLimit: 100 }
+    ),
+    (error) => error.name === "ContractActivityScanIncomplete" &&
+      !JSON.stringify(error).includes("private second-page failure")
+  );
 } finally {
   baseClient.getBasePublicClient = originalClient;
   console.warn = originalWarn;
 }
 
-process.stdout.write("PASS: Base RPC failures are redacted and repeated -32011 scans can be paused.\n");
+process.stdout.write("PASS: Base RPC errors are redacted; paginated scans deduplicate and reject partial results.\n");

@@ -11,6 +11,7 @@ import { getBasePublicClient, safeRpcErrorDiagnostic } from "@/lib/baseClient";
 export interface ContractActivityOptions {
   fromBlock?: bigint;
   toBlock?: bigint;
+  pageBlockLimit?: number;
 }
 
 export interface ContractActivityResult {
@@ -56,6 +57,16 @@ function clampCount(value: number) {
   return Math.min(Math.max(value, 0), MAX_INDEXER_LOGS_PER_APP);
 }
 
+function resolvePageBlockLimit(override?: number) {
+  const raw = override ?? Number(process.env.BASE_RPC_LOG_PAGE_BLOCKS ?? DEFAULT_BLOCK_SCAN_RANGE);
+
+  if (!Number.isSafeInteger(raw) || raw < 1 || raw > MAX_BLOCK_SCAN_RANGE) {
+    throw new Error("Invalid Base RPC log page block limit.");
+  }
+
+  return BigInt(raw);
+}
+
 export async function getRecentContractActivity(
   contractAddresses: string[],
   options: ContractActivityOptions = {}
@@ -63,6 +74,7 @@ export async function getRecentContractActivity(
   const client = getBasePublicClient();
   const toBlock = options.toBlock ?? (await client.getBlockNumber());
   const fromBlock = resolveFromBlock(toBlock, options.fromBlock);
+  const pageBlockLimit = resolvePageBlockLimit(options.pageBlockLimit);
   const addresses = Array.from(
     new Set(
       contractAddresses
@@ -77,22 +89,25 @@ export async function getRecentContractActivity(
     throw new Error("NoValidContractAddresses");
   }
 
-  for (const address of addresses) {
+  for (let pageFrom = fromBlock; pageFrom <= toBlock;) {
     if (logCount >= MAX_INDEXER_LOGS_PER_APP) {
       const error = new Error("Contract activity log budget exhausted.");
       error.name = "ContractLogBudgetExceeded";
       throw error;
     }
 
+    const pageTo = pageFrom + pageBlockLimit - 1n < toBlock
+      ? pageFrom + pageBlockLimit - 1n
+      : toBlock;
     let logs;
     try {
-      logs = await client.getLogs({ address, fromBlock, toBlock });
+      logs = await client.getLogs({ address: addresses, fromBlock: pageFrom, toBlock: pageTo });
     } catch (error) {
       const diagnostic = safeRpcErrorDiagnostic(error);
       console.warn("[base-indexer] contract log scan failed", {
-        address,
-        fromBlock: fromBlock.toString(),
-        toBlock: toBlock.toString(),
+        contractCount: addresses.length,
+        fromBlock: pageFrom.toString(),
+        toBlock: pageTo.toString(),
         ...diagnostic
       });
       const scanError = new Error("Contract activity RPC scan failed.") as ContractActivityScanError;
@@ -113,6 +128,8 @@ export async function getRecentContractActivity(
         transactionHashes.add(log.transactionHash.toLowerCase() as `0x${string}`);
       }
     }
+
+    pageFrom = pageTo + 1n;
   }
 
   return {

@@ -921,6 +921,20 @@ Verify the Base indexer:
 npm run verify:base-indexer
 ```
 
+### Restoring production log scans
+
+The public Base RPC is unsuitable for production log scans. Do not re-enable them by assuming a private endpoint supports `eth_getLogs`. First select a Base RPC provider and confirm its free-tier method limits, monthly quota, and whether overage can incur charges. For example, Chainstack advertises a free Developer plan with 3 million request units per month, but its pricing page also lists paid extra usage. Its Developer `eth_getLogs` limit is 100 blocks per request. Do not enable a billing method or paid overage for this project without a separate decision.
+
+Keep the provider URL only in server-side `BASE_RPC_URL` (local `.env.local`, then Vercel Production Secret). Never send the URL to the browser, paste it in chat, or put it in a cron URL. Before changing production, test the endpoint locally:
+
+```bash
+npm run verify:base-rpc-provider
+```
+
+Set `BASE_RPC_LOG_PAGE_BLOCKS=100` locally for Chainstack Developer. The indexer scans its 1,000-block sample in ten bounded pages, querying all verified app contracts together per page. Each page must succeed; partial results are discarded on failure. The read-only probe checks Base chain ID and latest block, then runs one 5-block and one configured-page-size `eth_getLogs` query against the verified Basenames registrar. It makes no database writes and prints no endpoint or raw provider error. It refuses the shared `mainnet.base.org` endpoint. Only after both checks pass should the URL and page limit be staged in Vercel and a single authorized, bounded refresh be tested. Confirm quota/overage controls and monitor refresh failures before relying on the scheduled job. Existing adapter metrics remain available while log scans are skipped.
+
+Provider references: [Base public RPC limitations](https://www.base.org/blog/base-mainnet-is-open-for-builders), [Chainstack pricing](https://chainstack.com/pricing/), [Chainstack log-query limits](https://chainstack.com/learn/how-to/how-to-fix-rpc-rate-limit-errors-429/), [Alchemy Base `eth_getLogs` limits](https://www.alchemy.com/docs/chains/base/base-api-endpoints/eth-get-logs).
+
 Limitations:
 
 - Base RPC rows are explicitly marked as `source = base_rpc`, `confidence = low`, `coverage = experimental`, with a block-range sample in notes.
