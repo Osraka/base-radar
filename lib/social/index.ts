@@ -29,7 +29,7 @@ export async function getSocialMetricsForApp(
   }
 }
 
-export { getFarcasterAliasesForApp } from "@/lib/social/farcaster";
+export { createNeynarRequestBudget, getFarcasterAliasesForApp } from "@/lib/social/farcaster";
 export type {
   SocialAppInput,
   SocialMetrics,

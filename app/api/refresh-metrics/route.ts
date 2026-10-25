@@ -35,7 +35,7 @@ import {
   isValidEthereumAddress,
   securityHeaders
 } from "@/lib/security";
-import { getSocialMetricsForApp } from "@/lib/social";
+import { createNeynarRequestBudget, getSocialMetricsForApp } from "@/lib/social";
 import type { SocialMetrics } from "@/lib/social/types";
 import { refreshBaseSocialTrends } from "@/lib/social/trends";
 import {
@@ -683,6 +683,7 @@ async function handleRefresh(request: Request) {
     let tokenSnapshotRows = 0;
     let tokenSnapshotErrors = 0;
     const socialFailedAppIds = new Set<string>();
+    const socialRequestBudget = createNeynarRequestBudget();
     let contractScansPaused = false;
 
     for (const app of approvedApps) {
@@ -691,7 +692,7 @@ async function handleRefresh(request: Request) {
           slug: app.slug,
           name: app.name,
           builderCode: app.builder_code
-        });
+        }, { requestBudget: socialRequestBudget });
         const activityPromise = contractScansPaused
           ? Promise.reject(Object.assign(new Error("Contract scans paused for this run."), {
               name: "BaseRpcScanPaused"
@@ -847,7 +848,7 @@ async function handleRefresh(request: Request) {
             slug: app.slug,
             name: app.name,
             builderCode: app.builder_code
-          }),
+          }, { requestBudget: socialRequestBudget }),
           adapter.getMetrics()
         ]);
         if (socialMetrics.availability === "partial" || socialMetrics.availability === "unavailable") {
@@ -914,7 +915,7 @@ async function handleRefresh(request: Request) {
           slug: app.slug,
           name: app.name,
           builderCode: app.builder_code
-        });
+        }, { requestBudget: socialRequestBudget });
         if (builderSocialMetrics.availability === "partial" || builderSocialMetrics.availability === "unavailable") {
           socialFailedAppIds.add(app.id);
         }

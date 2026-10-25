@@ -1,6 +1,7 @@
 import "server-only";
 
 import type {
+  NeynarRequestBudget,
   SocialAppInput,
   SocialMetrics,
   SocialMetricsOptions
@@ -15,6 +16,20 @@ const MAX_ALIASES_PER_APP = 4;
 const SOCIAL_LOOKBACK_DAYS = 7;
 const MAX_SOCIAL_MENTIONS = 500;
 const MIN_ALIAS_LENGTH = 4;
+const MAX_CONSECUTIVE_TRANSIENT_FAILURES = 2;
+
+export function createNeynarRequestBudget(): NeynarRequestBudget {
+  return { consecutiveTransientFailures: 0, paused: false };
+}
+
+function recordTransientFailure(budget?: NeynarRequestBudget) {
+  if (!budget) return;
+
+  budget.consecutiveTransientFailures += 1;
+  if (budget.consecutiveTransientFailures >= MAX_CONSECUTIVE_TRANSIENT_FAILURES) {
+    budget.paused = true;
+  }
+}
 
 export interface NeynarCast {
   hash?: string;
@@ -175,6 +190,10 @@ export async function fetchNeynarCastSearchResult(
     return cachedEntry.value;
   }
 
+  if (options.requestBudget?.paused) {
+    return { ok: false, response: null, error: "provider_cooldown" };
+  }
+
   const url = new URL(`${NEYNAR_API_BASE_URL}${NEYNAR_SEARCH_PATH}`);
   url.searchParams.set("q", query);
   url.searchParams.set("mode", "literal");
@@ -198,6 +217,11 @@ export async function fetchNeynarCastSearchResult(
     });
 
     if (!response.ok) {
+      if (response.status === 401 || response.status === 403 || response.status === 429) {
+        if (options.requestBudget) options.requestBudget.paused = true;
+      } else if (response.status >= 500) {
+        recordTransientFailure(options.requestBudget);
+      }
       return {
         ok: false,
         status: response.status,
@@ -215,8 +239,10 @@ export async function fetchNeynarCastSearchResult(
       value,
       expiresAt: Date.now() + getCacheTtlMs(options)
     });
+    if (options.requestBudget) options.requestBudget.consecutiveTransientFailures = 0;
     return value;
   } catch {
+    recordTransientFailure(options.requestBudget);
     return {
       ok: false,
       response: null,
@@ -297,7 +323,12 @@ export async function getFarcasterMetricsForApp(
       failedSearches.add(
         searchResult.status ? `status ${searchResult.status}` : searchResult.error ?? "unknown"
       );
-      if (searchResult.status === 401 || searchResult.status === 403) break;
+      if (
+        searchResult.status === 401 ||
+        searchResult.status === 403 ||
+        searchResult.status === 429 ||
+        searchResult.error === "provider_cooldown"
+      ) break;
       continue;
     }
 

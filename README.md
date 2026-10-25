@@ -411,7 +411,8 @@ Implementation:
 - `lib/social/farcaster.ts` calls Neynar's official cast search endpoint server-side.
 - `NEYNAR_API_KEY` is server-only and must never use `NEXT_PUBLIC_`.
 - `NEYNAR_CACHE_TTL_SECONDS=1800` controls in-process cache TTL.
-- Missing or failing Neynar calls return low-confidence zero metrics and do not break refresh jobs.
+- Missing or failing Neynar calls retain internal zero placeholders but mark social coverage unavailable or partial; the UI must not present those as verified zero mentions.
+- Each app refresh run stops further Neynar searches after two consecutive transient failures, or immediately after an authentication/rate-limit rejection. A successful search resets the transient-failure count. This is an in-run circuit, not a persistent outage claim.
 - Search is literal, 7-day rolling, and alias-based to reduce noisy matches.
 
 Matching rules:

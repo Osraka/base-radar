@@ -25,6 +25,12 @@ export interface SocialMetricsOptions {
   limit?: number;
   timeoutMs?: number;
   now?: Date;
+  requestBudget?: NeynarRequestBudget;
+}
+
+export interface NeynarRequestBudget {
+  consecutiveTransientFailures: number;
+  paused: boolean;
 }
 
 export interface BaseSocialTrend {

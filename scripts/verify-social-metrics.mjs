@@ -187,6 +187,7 @@ fs.mkdirSync(stubDir, { recursive: true });
 fs.writeFileSync(path.join(stubDir, "server-only.js"), "module.exports = {};\n");
 
 const {
+  createNeynarRequestBudget,
   fetchNeynarCastSearch,
   fetchNeynarCastSearchResult,
   getFarcasterAliasesForApp,
@@ -348,6 +349,62 @@ await check("Timeout and network failures have safe distinct categories", async 
     });
     assert(timeout.error === "timeout", "Aborted request must be a timeout.");
     return "network_error and timeout remain redacted and distinct.";
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+await check("A refresh run stops repeated Neynar failures without inventing social activity", async () => {
+  const originalFetch = global.fetch;
+  const requestBudget = createNeynarRequestBudget();
+  let attempts = 0;
+  try {
+    global.fetch = async () => {
+      attempts += 1;
+      throw new Error("private upstream failure");
+    };
+    const first = await fetchNeynarCastSearchResult('"Budget one"', {
+      apiKey: "test-only", requestBudget
+    });
+    const second = await fetchNeynarCastSearchResult('"Budget two"', {
+      apiKey: "test-only", requestBudget
+    });
+    const third = await fetchNeynarCastSearchResult('"Budget three"', {
+      apiKey: "test-only", requestBudget
+    });
+    assert(first.error === "network_error" && second.error === "network_error");
+    assert(third.error === "provider_cooldown" && attempts === 2);
+
+    const metrics = await getFarcasterMetricsForApp(
+      { slug: "moonwell", name: "Moonwell" },
+      { apiKey: "test-only", requestBudget }
+    );
+    assert(metrics.availability === "unavailable" && metrics.confidence === "low");
+    assert(metrics.mentions7d === 0 && attempts === 2);
+    assert(!JSON.stringify(metrics).includes("private upstream failure"));
+    return "two transient failures pause later searches; missing mentions stay unavailable.";
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+await check("Neynar authorization failure pauses a refresh without retrying", async () => {
+  const originalFetch = global.fetch;
+  const requestBudget = createNeynarRequestBudget();
+  let attempts = 0;
+  try {
+    global.fetch = async () => {
+      attempts += 1;
+      return { ok: false, status: 401 };
+    };
+    const first = await fetchNeynarCastSearchResult('"Budget auth one"', {
+      apiKey: "test-only", requestBudget
+    });
+    const second = await fetchNeynarCastSearchResult('"Budget auth two"', {
+      apiKey: "test-only", requestBudget
+    });
+    assert(first.status === 401 && second.error === "provider_cooldown" && attempts === 1);
+    return "one 401 prevents further calls in the run.";
   } finally {
     global.fetch = originalFetch;
   }
