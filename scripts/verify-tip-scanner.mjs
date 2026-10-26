@@ -27,6 +27,7 @@ function loadModule(relativePath, overrides = {}) {
 }
 
 const constants = loadModule("lib/constants.ts");
+const baseClient = loadModule("lib/baseClient.ts");
 const scanner = loadModule("lib/indexer/tipScanner.ts", { "@/lib/constants": constants });
 const addressA = "0x03c4738Ee98aE44591e1A4A4F3CaB6641d95DD9a";
 const addressB = "0x4200000000000000000000000000000000000006";
@@ -90,9 +91,26 @@ assert.match(migration, /unique \(contract_set_hash, to_block\)/i);
 const route = readFileSync(path.join(root, "app/api/scan-contract-tip/route.ts"), "utf8");
 assert.match(route, /verifyRefreshRequest\(request\)/);
 assert.match(route, /BASE_RPC_TIP_SCANNER_ENABLED/);
+assert.match(route, /createBaseTipClient\(\)/);
 assert.match(route, /acquireTipScanLease\(\)/);
 assert.match(route, /rateLimitTipScan\(request\)/);
 assert.doesNotMatch(route, /\.from\("app_metrics"\)/);
+
+const originalTipUrl = process.env.BASE_RPC_TIP_URL;
+try {
+  delete process.env.BASE_RPC_TIP_URL;
+  assert.equal(baseClient.getBaseTipRpcProviderKind(), "unknown");
+  assert.throws(() => baseClient.createBaseTipClient());
+  process.env.BASE_RPC_TIP_URL = "https://mainnet.base.org";
+  assert.equal(baseClient.getBaseTipRpcProviderKind(), "base-public");
+  assert.throws(() => baseClient.createBaseTipClient());
+  process.env.BASE_RPC_TIP_URL = "https://base-mainnet.core.chainstack.com/example-key";
+  assert.equal(baseClient.getBaseTipRpcProviderKind(), "private");
+  assert(baseClient.createBaseTipClient());
+} finally {
+  if (originalTipUrl === undefined) delete process.env.BASE_RPC_TIP_URL;
+  else process.env.BASE_RPC_TIP_URL = originalTipUrl;
+}
 
 const originalRedisUrl = process.env.UPSTASH_REDIS_REST_URL;
 const originalRedisToken = process.env.UPSTASH_REDIS_REST_TOKEN;

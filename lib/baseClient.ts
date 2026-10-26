@@ -51,6 +51,20 @@ export function getBaseRpcProviderKind() {
   return "other";
 }
 
+export function getBaseTipRpcProviderKind() {
+  const rpcUrl = parseRpcUrl(process.env.BASE_RPC_TIP_URL?.trim() ?? "");
+  if (!rpcUrl) return "unknown";
+  return new URL(rpcUrl).hostname.toLowerCase() === "mainnet.base.org" ? "base-public" : "private";
+}
+
+export function createBaseTipClient() {
+  const rpcUrl = parseRpcUrl(process.env.BASE_RPC_TIP_URL?.trim() ?? "");
+  if (!rpcUrl || getBaseTipRpcProviderKind() !== "private") {
+    throw new Error("Private Base tip RPC URL is not configured.");
+  }
+  return buildBasePublicClient(rpcUrl);
+}
+
 export function shouldSkipProductionContractLogScans() {
   return getContractLogScanStatus() !== "enabled";
 }

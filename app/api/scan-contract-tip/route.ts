@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getBasePublicClient, getBaseRpcProviderKind } from "@/lib/baseClient";
+import { createBaseTipClient, getBaseTipRpcProviderKind } from "@/lib/baseClient";
 import { verifyRefreshRequest } from "@/lib/cronAuth";
 import {
   aggregateTipLogs,
@@ -28,7 +28,7 @@ export async function POST(request: Request) {
     });
   }
 
-  const providerKind = getBaseRpcProviderKind();
+  const providerKind = getBaseTipRpcProviderKind();
   if (
     process.env.BASE_RPC_TIP_SCANNER_ENABLED !== "true" ||
     providerKind === "base-public" ||
@@ -86,7 +86,8 @@ export async function POST(request: Request) {
     if (lastWindowError) throw new Error("ScanStorageUnavailable");
 
     const previousToBlock = lastWindow ? BigInt(String(lastWindow.to_block)) : null;
-    const latestBlock = await getBasePublicClient().getBlockNumber();
+    const client = createBaseTipClient();
+    const latestBlock = await client.getBlockNumber();
     const plan = planTipWindow(latestBlock, previousToBlock);
 
     if (plan.kind === "up_to_date") {
@@ -95,7 +96,7 @@ export async function POST(request: Request) {
       });
     }
 
-    const logs = await getBasePublicClient().getLogs({
+    const logs = await client.getLogs({
       address: tracked.addresses,
       fromBlock: plan.fromBlock,
       toBlock: plan.toBlock
