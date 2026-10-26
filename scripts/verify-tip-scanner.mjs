@@ -54,13 +54,13 @@ assert.notEqual(
 );
 
 assert.deepEqual(scanner.planTipWindow(1_000n, null), {
-  kind: "scan", fromBlock: 829n, toBlock: 988n, gapBeforeBlocks: null
+  kind: "scan", fromBlock: 889n, toBlock: 988n, gapBeforeBlocks: null
 });
 assert.deepEqual(scanner.planTipWindow(1_060n, 988n), {
   kind: "scan", fromBlock: 989n, toBlock: 1_048n, gapBeforeBlocks: 0n
 });
 assert.deepEqual(scanner.planTipWindow(1_200n, 988n), {
-  kind: "scan", fromBlock: 1_029n, toBlock: 1_188n, gapBeforeBlocks: 40n
+  kind: "scan", fromBlock: 1_089n, toBlock: 1_188n, gapBeforeBlocks: 100n
 });
 assert.deepEqual(scanner.planTipWindow(1_096n, 988n), {
   kind: "scan", fromBlock: 989n, toBlock: 1_084n, gapBeforeBlocks: 0n

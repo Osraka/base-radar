@@ -4,8 +4,8 @@ import { createHash } from "node:crypto";
 import { isAddress, type Address, type Log } from "viem";
 import { MAX_CONTRACT_ADDRESSES_PER_APP } from "@/lib/constants";
 
-// A two-minute cron can arrive late or miss one run; this bounds catch-up to about five minutes on Base.
-export const TIP_SCAN_BLOCKS = 160n;
+// Stay within the private provider's verified 100-block log limit; late or missed runs remain visible as gaps.
+export const TIP_SCAN_BLOCKS = 100n;
 export const TIP_CONFIRMATION_BLOCKS = 12n;
 export const MAX_TIP_SCAN_LOGS = 5_000;
 export const MAX_TIP_SCAN_ADDRESSES = 50;
