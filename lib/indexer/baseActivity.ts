@@ -28,7 +28,7 @@ type ContractActivityScanError = Error & { rpcCode?: number };
 export function shouldPauseContractScans(error: unknown) {
   return error instanceof Error &&
     error.name === "ContractActivityScanIncomplete" &&
-    (error as ContractActivityScanError).rpcCode === -32011;
+    [-32011, -32002].includes((error as ContractActivityScanError).rpcCode ?? 0);
 }
 
 function toAddress(value: string): Address | null {

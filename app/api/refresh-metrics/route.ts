@@ -725,8 +725,9 @@ async function handleRefresh(request: Request) {
         ]);
         if (activityResult.status === "rejected" && shouldPauseContractScans(activityResult.reason)) {
           contractScansPaused = true;
+          const rpcCode = (activityResult.reason as { rpcCode?: number }).rpcCode;
           console.warn("[base-indexer] pausing remaining contract scans", {
-            rpcCode: -32011,
+            rpcCode: rpcCode === -32002 ? -32002 : -32011,
             providerKind: getBaseRpcProviderKind()
           });
         }

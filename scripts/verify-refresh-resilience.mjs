@@ -104,7 +104,7 @@ const originalClient = baseClient.getBasePublicClient;
 const originalWarn = console.warn;
 try {
   console.warn = () => {};
-  for (const code of [-32011, -32005]) {
+  for (const code of [-32011, -32002, -32005]) {
     baseClient.getBasePublicClient = () => ({
       getLogs: async () => {
         throw Object.assign(new Error("secret RPC response"), {
@@ -122,7 +122,7 @@ try {
       (error) => {
         assert.equal(error.name, "ContractActivityScanIncomplete");
         assert.equal(error.rpcCode, code);
-        assert.equal(baseActivity.shouldPauseContractScans(error), code === -32011);
+        assert.equal(baseActivity.shouldPauseContractScans(error), code === -32011 || code === -32002);
         assert(!JSON.stringify(error).includes("private-rpc"));
         return true;
       }
@@ -180,4 +180,4 @@ try {
   console.warn = originalWarn;
 }
 
-process.stdout.write("PASS: Base RPC errors are redacted; paginated scans deduplicate and reject partial results.\n");
+process.stdout.write("PASS: Base RPC errors are redacted; unsupported log scans pause; paginated scans reject partial results.\n");

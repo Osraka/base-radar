@@ -60,7 +60,7 @@ function diagnostic(error) {
     current = current.cause;
   }
 
-  return JSON.stringify(result);
+  return result;
 }
 
 const startedAt = Date.now();
@@ -87,8 +87,26 @@ try {
     );
   }
 
-  process.stdout.write("PASS: Provider supports bounded Base contract-log scans. No data was written.\n");
+  const olderToBlock = latest - BigInt(pageBlockLimit);
+  if (olderToBlock < BigInt(pageBlockLimit - 1)) {
+    throw new Error("InsufficientChainHistory");
+  }
+  const olderFromBlock = olderToBlock - BigInt(pageBlockLimit - 1);
+  const olderLogs = await client.getLogs({
+    address,
+    fromBlock: olderFromBlock,
+    toBlock: olderToBlock
+  });
+  process.stdout.write(
+    `PASS: Historical ${pageBlockLimit}-block page (${olderLogs.length} logs, ${Date.now() - startedAt}ms elapsed).\n`
+  );
+
+  process.stdout.write("PASS: Provider supports adjacent recent and historical Base log pages. No data was written.\n");
 } catch (error) {
-  process.stderr.write(`FAIL: RPC probe ${diagnostic(error)}. No data was written.\n`);
+  const safeDiagnostic = diagnostic(error);
+  const archiveHint = safeDiagnostic.rpcCode === -32002
+    ? " Historical log access is unavailable on this plan."
+    : "";
+  process.stderr.write(`FAIL: RPC probe ${JSON.stringify(safeDiagnostic)}.${archiveHint} No data was written.\n`);
   process.exitCode = 1;
 }
