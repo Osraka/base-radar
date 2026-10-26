@@ -937,6 +937,20 @@ Set `BASE_RPC_LOG_PAGE_BLOCKS=100` locally for Chainstack Developer. The indexer
 
 On 2026-10-26, the free Chainstack Base node passed the latest 100-block page but rejected the preceding page with RPC `-32002` (archive access unavailable on the current plan). A staged Vercel refresh confirmed zero Base RPC metric rows and an isolated source failure. This node is therefore **not** production-ready for the current 10-minute refresh cadence or the 1,000-block sample. The live deployment stays on the public Base RPC with contract scans disabled; do not infer that recent-only log access provides complete 24h activity. No paid upgrade or overage was enabled.
 
+### Recent-tip capture (staged, not scheduled)
+
+`POST /api/scan-contract-tip` is a separate, disabled-by-default experiment for a private RPC that can read the latest blocks but not historical pages. With `BASE_RPC_TIP_SCANNER_ENABLED=true`, `REFRESH_SECRET`, a verified private `BASE_RPC_URL`, and the `base_contract_scan_windows` migration applied, it queries at most 80 blocks ending 12 blocks behind the head. It queries all approved tracked contracts together, groups distinct transaction hashes by app, and stores a private window record. A rerun of the same block tip does not create another record. The first record has no continuity baseline; later records explicitly store the number of skipped blocks. Invalid or excessive contract sets, incomplete logs, and over-budget responses fail without writing a partial window. No wallet counts are inferred from log topics.
+
+The table has RLS enabled and no public policies or grants; only the server-side service role can write it. The API requires the refresh secret, its own 40/hour rate limit, and a 90-second Upstash lease to avoid overlapping serverless executions. It **does not write `app_metrics` or change rankings**. Do not schedule it until the migration, provider quota, consecutive-window continuity, and real cron latency have been checked. A two-minute schedule would mean about 720 scans/day plus `eth_blockNumber` calls; confirm actual request-unit use in Chainstack before leaving it enabled. If a run arrives too late for the provider's recent-tip window, it records a gap rather than inventing coverage. Never call these samples 24h activity until a full, gap-free day and source semantics are independently validated.
+
+Local verification:
+
+```bash
+npm run verify:tip-scanner
+```
+
+Keep `BASE_RPC_TIP_SCANNER_ENABLED=false` in Production until a separate staged rollout decision. This flag does not turn on the existing 1,000-block contract scanner (`BASE_RPC_CONTRACT_SCANS_ENABLED`); both flags are server-only. There is no Vercel or cron-job.org schedule for this experimental route.
+
 Provider references: [Base public RPC limitations](https://www.base.org/blog/base-mainnet-is-open-for-builders), [Chainstack pricing](https://chainstack.com/pricing/), [Chainstack log-query limits](https://chainstack.com/learn/how-to/how-to-fix-rpc-rate-limit-errors-429/), [Alchemy Base `eth_getLogs` limits](https://www.alchemy.com/docs/chains/base/base-api-endpoints/eth-get-logs).
 
 Limitations:

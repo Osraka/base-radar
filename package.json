@@ -17,6 +17,7 @@
     "verify:rate-limit": "node scripts/verify-rate-limit.mjs",
     "verify:base-indexer": "node scripts/verify-base-indexer.mjs",
     "verify:base-rpc-provider": "node scripts/verify-base-rpc-provider.mjs",
+    "verify:tip-scanner": "node scripts/verify-tip-scanner.mjs",
     "verify:builder-codes": "node scripts/verify-builder-codes.mjs",
     "verify:builder-code-bridge": "node scripts/verify-builder-code-bridge.mjs",
     "verify:refresh-cron": "node scripts/verify-refresh-cron.mjs",
