@@ -57,6 +57,7 @@ UPSTASH_REDIS_REST_URL=
 UPSTASH_REDIS_REST_TOKEN=
 APP_URL=http://localhost:3000
 BASE_RPC_URL=
+BASE_RPC_CONTRACT_SCANS_ENABLED=false
 REFRESH_SECRET=
 CRON_SECRET=
 MAX_INDEXER_APPS_PER_RUN=20
@@ -133,6 +134,7 @@ Environment placement:
 - Vercel Production: set every variable above. `NEXT_PUBLIC_USE_MOCK_DATA` must be `false`.
 - Vercel Preview: use a separate Supabase project or clearly isolated preview data when possible. Keep all server-only values in Preview env too if preview cron/indexer checks are needed.
 - Local: use `.env.local`. `APP_URL=http://localhost:3000` is fine locally. Mock mode can stay enabled for design work, but live verification requires `NEXT_PUBLIC_USE_MOCK_DATA=false`.
+- Leave `BASE_RPC_CONTRACT_SCANS_ENABLED=false` in Production and Preview until a private provider passes the bounded historical log probe and a staged refresh. This is server-only; changing it requires redeployment.
 
 Security rules:
 
@@ -923,7 +925,7 @@ npm run verify:base-indexer
 
 ### Restoring production log scans
 
-The public Base RPC is unsuitable for production log scans. Do not re-enable them by assuming a private endpoint supports `eth_getLogs`. First select a Base RPC provider and confirm its free-tier method limits, monthly quota, and whether overage can incur charges. For example, Chainstack advertises a free Developer plan with 3 million request units per month, but its pricing page also lists paid extra usage. Its Developer `eth_getLogs` limit is 100 blocks per request. Do not enable a billing method or paid overage for this project without a separate decision.
+The public Base RPC is unsuitable for production log scans. Production scans are disabled by default even when `BASE_RPC_URL` points to a private provider. Do not re-enable them by assuming a private endpoint supports `eth_getLogs`. First select a Base RPC provider and confirm its free-tier method limits, monthly quota, and whether overage can incur charges. For example, Chainstack advertises a free Developer plan with 3 million request units per month, but its pricing page also lists paid extra usage. Its Developer `eth_getLogs` limit is 100 blocks per request. Do not enable a billing method or paid overage for this project without a separate decision.
 
 Keep the provider URL only in server-side `BASE_RPC_URL` (local `.env.local`, then Vercel Production Secret). Never send the URL to the browser, paste it in chat, or put it in a cron URL. Before changing production, test the endpoint locally:
 
@@ -931,7 +933,7 @@ Keep the provider URL only in server-side `BASE_RPC_URL` (local `.env.local`, th
 npm run verify:base-rpc-provider
 ```
 
-Set `BASE_RPC_LOG_PAGE_BLOCKS=100` locally for Chainstack Developer. The indexer scans its 1,000-block sample in ten bounded pages, querying all verified app contracts together per page. Each page must succeed; partial results are discarded on failure. The read-only probe checks Base chain ID and latest block, then queries 5 recent blocks, the latest configured-size page, and the immediately preceding page against the verified Basenames registrar. It makes no database writes and prints no endpoint or raw provider error. It refuses the shared `mainnet.base.org` endpoint. Only after all checks pass should the URL and page limit be staged in Vercel and a single authorized, bounded refresh be tested. Confirm quota/overage controls and monitor refresh failures before relying on the scheduled job. Existing adapter metrics remain available while log scans are skipped.
+Set `BASE_RPC_LOG_PAGE_BLOCKS=100` locally for Chainstack Developer. The indexer scans its 1,000-block sample in ten bounded pages, querying all verified app contracts together per page. Each page must succeed; partial results are discarded on failure. The read-only probe checks Base chain ID and latest block, then queries 5 recent blocks, the latest configured-size page, and the immediately preceding page against the verified Basenames registrar. It makes no database writes and prints no endpoint or raw provider error. It refuses the shared `mainnet.base.org` endpoint. Only after all checks pass should the URL and page limit be staged in Vercel and a single authorized, bounded refresh be tested. Confirm quota/overage controls and monitor refresh failures before relying on the scheduled job. **Only after the staged scan succeeds**, set server-only `BASE_RPC_CONTRACT_SCANS_ENABLED=true` on the verified deployment and redeploy. The public RPC stays disabled regardless of this flag. `/api/health` and refresh summaries expose `contractLogScanStatus` without exposing endpoint credentials. Existing adapter metrics remain available while log scans are skipped.
 
 On 2026-10-26, the free Chainstack Base node passed the latest 100-block page but rejected the preceding page with RPC `-32002` (archive access unavailable on the current plan). A staged Vercel refresh confirmed zero Base RPC metric rows and an isolated source failure. This node is therefore **not** production-ready for the current 10-minute refresh cadence or the 1,000-block sample. The live deployment stays on the public Base RPC with contract scans disabled; do not infer that recent-only log access provides complete 24h activity. No paid upgrade or overage was enabled.
 

@@ -16,7 +16,7 @@ import type { AdapterMetrics } from "@/lib/adapters/types";
 import {
   getBasePublicClient,
   getBaseRpcProviderKind,
-  shouldSkipProductionContractLogScans
+  getContractLogScanStatus
 } from "@/lib/baseClient";
 import { attributeTransaction } from "@/lib/builderCodes/attribution";
 import { calculateBuilderCodeMetricsForApp } from "@/lib/builderCodes/metricsBridge";
@@ -66,6 +66,7 @@ type RefreshTriggerType = (typeof REFRESH_TRIGGER_TYPES)[number];
 interface RefreshSummary {
   ok: boolean;
   mode: "full" | "fast";
+  contractLogScanStatus: ReturnType<typeof getContractLogScanStatus> | "provider_rejected";
   warnings: string[];
   processedApps: number;
   baseRpcMetricsInserted: number;
@@ -655,8 +656,9 @@ async function handleRefresh(request: Request) {
           batchNow
         )
       : adapterOnlyCandidates.slice(0, maxApps);
-    const publicRpcLogScansDisabled = shouldSkipProductionContractLogScans();
-    const blockWindow = approvedApps.length > 0 && !publicRpcLogScansDisabled
+    const contractLogScanStatus = getContractLogScanStatus();
+    const contractLogScansDisabled = contractLogScanStatus !== "enabled";
+    const blockWindow = approvedApps.length > 0 && !contractLogScansDisabled
       ? await readRecentBlockWindow(
           () => getBasePublicClient().getBlockNumber(),
           blockRange
@@ -700,9 +702,9 @@ async function handleRefresh(request: Request) {
           name: app.name,
           builderCode: app.builder_code
         }, { requestBudget: socialRequestBudget });
-        const activityPromise = publicRpcLogScansDisabled
-          ? Promise.reject(Object.assign(new Error("Public Base RPC contract scans are disabled."), {
-              name: "BaseRpcPublicEndpointSkipped"
+        const activityPromise = contractLogScansDisabled
+          ? Promise.reject(Object.assign(new Error("Production contract scans are disabled."), {
+              name: "BaseRpcScanDisabled"
             }))
           : contractScansPaused
           ? Promise.reject(Object.assign(new Error("Contract scans paused for this run."), {
@@ -782,7 +784,7 @@ async function handleRefresh(request: Request) {
         } else {
           if (
             activityResult.reason instanceof Error &&
-            ["BaseRpcScanPaused", "BaseRpcPublicEndpointSkipped"].includes(activityResult.reason.name)
+            ["BaseRpcScanPaused", "BaseRpcScanDisabled"].includes(activityResult.reason.name)
           ) {
             skipped += 1;
           } else {
@@ -1008,7 +1010,7 @@ async function handleRefresh(request: Request) {
       newlyDiscoveredCount: tokenSnapshotRows,
       measuredAt,
       mode: fastMode ? "fast" : "full",
-      contractLogScanStatus: publicRpcLogScansDisabled ? "public_endpoint_skipped" : contractScansPaused ? "provider_rejected" : "enabled",
+      contractLogScanStatus: contractScansPaused ? "provider_rejected" : contractLogScanStatus,
       fromBlock: fromBlock?.toString() ?? null,
       toBlock: latestBlock?.toString() ?? null
     });
@@ -1016,8 +1018,13 @@ async function handleRefresh(request: Request) {
     const summary: RefreshSummary = {
       ok: refreshed + protocolAdapterMetricRows + builderCodeMetricRows > 0,
       mode: fastMode ? "fast" : "full",
-      warnings: publicRpcLogScansDisabled
+      contractLogScanStatus: contractScansPaused ? "provider_rejected" : contractLogScanStatus,
+      warnings: contractLogScanStatus === "public_endpoint_skipped"
         ? ["Contract-log scans were skipped because the public Base RPC is rate-limited for production use; protocol adapters continued."]
+        : contractLogScanStatus === "unconfigured_endpoint_skipped"
+          ? ["Contract-log scans were skipped because no valid Base RPC endpoint is configured; protocol adapters continued."]
+        : contractLogScanStatus === "unverified_provider_skipped"
+          ? ["Contract-log scans require a verified provider and explicit production opt-in; protocol adapters continued."]
         : contractScansPaused
           ? ["Contract-log scans were paused after a provider rejection; protocol adapters continued."]
           : [],
@@ -1087,6 +1094,7 @@ async function handleRefresh(request: Request) {
     return NextResponse.json(
       {
         ok: false,
+        contractLogScanStatus: getContractLogScanStatus(),
         processedApps: 0,
         baseRpcMetricsInserted: 0,
         protocolAdapterMetricsInserted: 0,

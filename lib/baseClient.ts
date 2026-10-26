@@ -52,7 +52,16 @@ export function getBaseRpcProviderKind() {
 }
 
 export function shouldSkipProductionContractLogScans() {
-  return process.env.NODE_ENV === "production" && getBaseRpcProviderKind() === "base-public";
+  return getContractLogScanStatus() !== "enabled";
+}
+
+export function getContractLogScanStatus() {
+  if (process.env.NODE_ENV !== "production") return "enabled" as const;
+  const providerKind = getBaseRpcProviderKind();
+  if (providerKind === "base-public") return "public_endpoint_skipped" as const;
+  if (providerKind === "unknown") return "unconfigured_endpoint_skipped" as const;
+  if (process.env.BASE_RPC_CONTRACT_SCANS_ENABLED !== "true") return "unverified_provider_skipped" as const;
+  return "enabled" as const;
 }
 
 export function createBasePublicClient() {

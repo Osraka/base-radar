@@ -76,6 +76,7 @@ assert.equal(
 
 const originalRpcUrl = process.env.BASE_RPC_URL;
 const originalNodeEnv = process.env.NODE_ENV;
+const originalContractScanOptIn = process.env.BASE_RPC_CONTRACT_SCANS_ENABLED;
 try {
   process.env.BASE_RPC_URL = "https://base-mainnet.g.alchemy.com/v2/private-key";
   assert.equal(baseClient.getBaseRpcProviderKind(), "alchemy");
@@ -86,10 +87,22 @@ try {
   assert(!baseClient.getBaseRpcProviderKind().includes("private-key"));
 
   process.env.NODE_ENV = "production";
+  delete process.env.BASE_RPC_CONTRACT_SCANS_ENABLED;
   process.env.BASE_RPC_URL = "https://mainnet.base.org";
   assert.equal(baseClient.shouldSkipProductionContractLogScans(), true);
+  assert.equal(baseClient.getContractLogScanStatus(), "public_endpoint_skipped");
   process.env.BASE_RPC_URL = "https://base-mainnet.quiknode.pro/private-key";
+  assert.equal(baseClient.shouldSkipProductionContractLogScans(), true);
+  assert.equal(baseClient.getContractLogScanStatus(), "unverified_provider_skipped");
+  process.env.BASE_RPC_CONTRACT_SCANS_ENABLED = "TRUE";
+  assert.equal(baseClient.shouldSkipProductionContractLogScans(), true);
+  process.env.BASE_RPC_CONTRACT_SCANS_ENABLED = "true";
   assert.equal(baseClient.shouldSkipProductionContractLogScans(), false);
+  assert.equal(baseClient.getContractLogScanStatus(), "enabled");
+  process.env.BASE_RPC_URL = "not-a-url";
+  assert.equal(baseClient.getContractLogScanStatus(), "unconfigured_endpoint_skipped");
+  process.env.BASE_RPC_URL = "https://mainnet.base.org";
+  assert.equal(baseClient.getContractLogScanStatus(), "public_endpoint_skipped");
   process.env.NODE_ENV = "development";
   process.env.BASE_RPC_URL = "https://mainnet.base.org";
   assert.equal(baseClient.shouldSkipProductionContractLogScans(), false);
@@ -98,6 +111,8 @@ try {
   else process.env.BASE_RPC_URL = originalRpcUrl;
   if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
   else process.env.NODE_ENV = originalNodeEnv;
+  if (originalContractScanOptIn === undefined) delete process.env.BASE_RPC_CONTRACT_SCANS_ENABLED;
+  else process.env.BASE_RPC_CONTRACT_SCANS_ENABLED = originalContractScanOptIn;
 }
 
 const originalClient = baseClient.getBasePublicClient;

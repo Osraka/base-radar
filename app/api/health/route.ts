@@ -6,6 +6,7 @@ import {
   USE_MOCK_DATA
 } from "@/lib/constants";
 import { checkCoinSchemaStatus } from "@/lib/coins/schema";
+import { getContractLogScanStatus } from "@/lib/baseClient";
 import { getLatestSuccessfulCoinJobAt } from "@/lib/coins/jobRuns";
 import {
   createSupabaseAdminClient,
@@ -290,6 +291,7 @@ export async function GET() {
       isAppDataStale,
       appMetricFreshnessScope: "latest-measured-app",
       appMetricRefreshCoverage: "rotating-partial-batches",
+      contractLogScanStatus: getContractLogScanStatus(),
       isCoinDataStale,
       isCoinDiscoveryStale,
       cronFrequency: {
