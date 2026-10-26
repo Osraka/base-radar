@@ -54,14 +54,17 @@ assert.notEqual(
 );
 
 assert.deepEqual(scanner.planTipWindow(1_000n, null), {
-  kind: "scan", fromBlock: 909n, toBlock: 988n, gapBeforeBlocks: null
+  kind: "scan", fromBlock: 829n, toBlock: 988n, gapBeforeBlocks: null
 });
 assert.deepEqual(scanner.planTipWindow(1_060n, 988n), {
   kind: "scan", fromBlock: 989n, toBlock: 1_048n, gapBeforeBlocks: 0n
 });
 assert.deepEqual(scanner.planTipWindow(1_200n, 988n), {
-  kind: "scan", fromBlock: 1_109n, toBlock: 1_188n, gapBeforeBlocks: 120n
+  kind: "scan", fromBlock: 1_029n, toBlock: 1_188n, gapBeforeBlocks: 40n
 });
+assert.deepEqual(scanner.planTipWindow(1_096n, 988n), {
+  kind: "scan", fromBlock: 989n, toBlock: 1_084n, gapBeforeBlocks: 0n
+}, "Late cron executions within the catch-up budget must preserve continuity.");
 assert.deepEqual(scanner.planTipWindow(1_000n, 988n), { kind: "up_to_date" });
 assert.deepEqual(scanner.planTipWindow(11n, null), { kind: "up_to_date" });
 
