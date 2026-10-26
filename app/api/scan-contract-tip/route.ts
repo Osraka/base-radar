@@ -7,7 +7,7 @@ import {
   MAX_TIP_SCAN_ADDRESSES,
   planTipWindow
 } from "@/lib/indexer/tipScanner";
-import { acquireTipScanLease } from "@/lib/indexer/tipScanLease";
+import { acquireTipScanLease, releaseTipScanLease } from "@/lib/indexer/tipScanLease";
 import { RATE_LIMITED_ERROR, rateLimitHeaders, rateLimitTipScan } from "@/lib/rateLimit";
 import { securityHeaders } from "@/lib/security";
 import { createSupabaseAdminClient, isSupabaseAdminConfigured } from "@/lib/supabase/admin";
@@ -42,8 +42,10 @@ export async function POST(request: Request) {
     }, { status: 503, headers: securityHeaders(rateLimit) });
   }
 
+  let leaseOwner: string | null = null;
   try {
-    if (!await acquireTipScanLease()) {
+    leaseOwner = await acquireTipScanLease();
+    if (!leaseOwner) {
       return NextResponse.json({ ok: true, status: "already_running", startedAt, finishedAt: new Date().toISOString() }, {
         headers: securityHeaders(rateLimit)
       });
@@ -153,5 +155,13 @@ export async function POST(request: Request) {
       status: 503,
       headers: securityHeaders(rateLimit)
     });
+  } finally {
+    if (leaseOwner) {
+      try {
+        await releaseTipScanLease(leaseOwner);
+      } catch {
+        console.warn("[tip-scanner] lease release failed");
+      }
+    }
   }
 }

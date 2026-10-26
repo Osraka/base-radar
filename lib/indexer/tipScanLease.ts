@@ -1,21 +1,36 @@
 import "server-only";
 
+import { randomUUID } from "node:crypto";
 import { Redis } from "@upstash/redis";
 
 const TIP_SCAN_LEASE_KEY = "base-radar:tip-scan:lease";
 const TIP_SCAN_LEASE_SECONDS = 90;
+const RELEASE_OWNED_LEASE = `
+  if redis.call("GET", KEYS[1]) == ARGV[1] then
+    return redis.call("DEL", KEYS[1])
+  end
+  return 0
+`;
 
-export async function acquireTipScanLease() {
+function getRedis() {
   const url = process.env.UPSTASH_REDIS_REST_URL;
   const token = process.env.UPSTASH_REDIS_REST_TOKEN;
 
   if (!url || !token) throw new Error("TipScanLeaseUnavailable");
+  return new Redis({ url, token });
+}
 
-  const redis = new Redis({ url, token });
-  const result = await redis.set(TIP_SCAN_LEASE_KEY, Date.now().toString(), {
+export async function acquireTipScanLease(): Promise<string | null> {
+  const owner = randomUUID();
+  const result = await getRedis().set(TIP_SCAN_LEASE_KEY, owner, {
     nx: true,
     ex: TIP_SCAN_LEASE_SECONDS
   });
 
-  return result === "OK";
+  return result === "OK" ? owner : null;
+}
+
+export async function releaseTipScanLease(owner: string): Promise<boolean> {
+  const deleted = await getRedis().eval(RELEASE_OWNED_LEASE, [TIP_SCAN_LEASE_KEY], [owner]);
+  return Number(deleted) === 1;
 }

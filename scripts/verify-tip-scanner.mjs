@@ -96,6 +96,8 @@ assert.match(route, /verifyRefreshRequest\(request\)/);
 assert.match(route, /BASE_RPC_TIP_SCANNER_ENABLED/);
 assert.match(route, /createBaseTipClient\(\)/);
 assert.match(route, /acquireTipScanLease\(\)/);
+assert.match(route, /releaseTipScanLease\(leaseOwner\)/);
+assert.match(route, /finally\s*\{/);
 assert.match(route, /rateLimitTipScan\(request\)/);
 assert.doesNotMatch(route, /\.from\("app_metrics"\)/);
 
@@ -117,16 +119,27 @@ try {
 
 const originalRedisUrl = process.env.UPSTASH_REDIS_REST_URL;
 const originalRedisToken = process.env.UPSTASH_REDIS_REST_TOKEN;
-let leaseResult = "OK";
 let leaseOptions;
+let leaseOwner;
+let currentOwner = null;
 const lease = loadModule("lib/indexer/tipScanLease.ts", {
   "@upstash/redis": {
     Redis: class {
       async set(key, value, options) {
         assert.equal(key, "base-radar:tip-scan:lease");
-        assert.match(value, /^\d+$/);
+        assert.match(value, /^[0-9a-f-]{36}$/);
         leaseOptions = options;
-        return leaseResult;
+        if (currentOwner) return null;
+        currentOwner = value;
+        return "OK";
+      }
+      async eval(script, keys, args) {
+        assert.match(script, /redis\.call\("GET", KEYS\[1\]\)/);
+        assert.match(script, /redis\.call\("DEL", KEYS\[1\]\)/);
+        assert.deepEqual(keys, ["base-radar:tip-scan:lease"]);
+        if (currentOwner !== args[0]) return 0;
+        currentOwner = null;
+        return 1;
       }
     }
   }
@@ -137,10 +150,14 @@ try {
   await assert.rejects(lease.acquireTipScanLease(), /TipScanLeaseUnavailable/);
   process.env.UPSTASH_REDIS_REST_URL = "https://example.test";
   process.env.UPSTASH_REDIS_REST_TOKEN = "not-a-real-token";
-  assert.equal(await lease.acquireTipScanLease(), true);
+  leaseOwner = await lease.acquireTipScanLease();
+  assert.match(leaseOwner, /^[0-9a-f-]{36}$/);
   assert.deepEqual(leaseOptions, { nx: true, ex: 90 });
-  leaseResult = null;
-  assert.equal(await lease.acquireTipScanLease(), false);
+  assert.equal(await lease.acquireTipScanLease(), null);
+  assert.equal(await lease.releaseTipScanLease("not-the-owner"), false);
+  assert.equal(await lease.acquireTipScanLease(), null);
+  assert.equal(await lease.releaseTipScanLease(leaseOwner), true);
+  assert.match(await lease.acquireTipScanLease(), /^[0-9a-f-]{36}$/);
 } finally {
   if (originalRedisUrl === undefined) delete process.env.UPSTASH_REDIS_REST_URL;
   else process.env.UPSTASH_REDIS_REST_URL = originalRedisUrl;
